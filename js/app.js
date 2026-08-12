@@ -16,15 +16,20 @@ const state = {
   viewMode: 'realtime', // 'realtime' | 'browser'
   useNow: true,
   manualClock: null, // {hour, minute}
-  typeFilter: '', // 時刻表ブラウザ用の種別絞り込み
-  destFilter: '', // 時刻表ブラウザ用の行先絞り込み
+  // 種別・行先の絞り込み(チェックボックス式)。チェックが入っている値だけを表示する。
+  // 初めて登場した値はデフォルトでチェック済みにする(typeFiltersKnown/destFiltersKnownで既知かどうかを管理)。
+  typeFiltersChecked: new Set(),
+  typeFiltersKnown: new Set(),
+  destFiltersChecked: new Set(),
+  destFiltersKnown: new Set(),
 };
 
 const FLAP_ROW_COUNT = 3; // 発車案内の表示段数
 
 /**
- * パタパタ(反転フラップ)式表示機は、実機同様1コマ=1文字のリールを模している。
- * 「時」「分」は0〜9+空欄の11コマ、「種別」「行先」は文字位置ごとに実際に登場する文字だけを積む。
+ * パタパタ(反転フラップ)式表示機は、実機同様1コマ=1文字(または1つの値)のリールを模している。
+ * 「時」「分」はそれぞれ60コマのリール(時は00〜28のみ値があり、それ以降は空欄)、
+ * 「種別」「行先」はあらかじめ用意した単語一覧を1枚のコマとして積む。
  * リールは一方向にしか回らないため、値が変わるときは目的のコマまで1つずつ順番にめくれる。
  * 実際の車両・路線に合わせて自由に編集してください。
  */
@@ -36,11 +41,11 @@ const FLAP_DESTINATIONS = [
   '青波中央', '茶志内', '船渡川', '高輪平', '朝日ヶ丘', '港が丘', '新森町', '花咲野',
 ];
 const FLAP_MAX_HOUR = 28; // 時のコマは00〜28まで(深夜帯対応)。それ以外は無表示
+const FLAP_SLOTS = 60; // 時・分のリールはどちらも60コマ
 
-/** 時刻の1桁ぶんのリール(実機同様、コマは1つにつき1文字)。0〜9の10コマ+空欄1コマの11コマ構成。 */
-const DIGIT_SLOTS = 11;
-function buildDigitReel() {
-  return Array.from({ length: DIGIT_SLOTS }, (_, i) => (i < 10 ? String(i) : ''));
+/** index(0〜59) → そのコマに印字されている文字列、を返すリールを1本組み立てる */
+function buildFlapReel(mapFn) {
+  return Array.from({ length: FLAP_SLOTS }, (_, i) => mapFn(i));
 }
 
 /** 種別・行先は単語ごと1枚のコマとして扱う(あらかじめ用意した単語一覧+空欄1コマ) */
@@ -49,10 +54,8 @@ function buildWordReel(words) {
 }
 
 const FLAP_REEL = {
-  hourTens: buildDigitReel(),
-  hourOnes: buildDigitReel(),
-  minuteTens: buildDigitReel(),
-  minuteOnes: buildDigitReel(),
+  hour: buildFlapReel((i) => (i <= FLAP_MAX_HOUR ? String(i).padStart(2, '0') : '')),
+  minute: buildFlapReel((i) => String(i).padStart(2, '0')),
   type: buildWordReel(FLAP_TYPES),
   dest: buildWordReel(FLAP_DESTINATIONS),
 };
@@ -196,20 +199,19 @@ function bindEvents() {
   els.fileSelect.addEventListener('change', (e) => loadOudFile(e.target.value));
   els.diaSelect.addEventListener('change', (e) => {
     state.diaIndex = parseInt(e.target.value, 10);
-    state.typeFilter = '';
-    state.destFilter = '';
+    populateFilterOptions();
     renderBoard();
   });
   els.stationSelect.addEventListener('change', (e) => {
     state.stationIndex = parseInt(e.target.value, 10);
-    state.typeFilter = '';
-    state.destFilter = '';
+    populateFilterOptions();
     renderBoard();
   });
   els.directionButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
       state.directionFilter = btn.dataset.direction;
       els.directionButtons.forEach((b) => b.classList.toggle('is-active', b === btn));
+      populateFilterOptions();
       renderBoard();
     });
   });
@@ -241,14 +243,6 @@ function bindEvents() {
       state.manualClock = { baseMinutes: adjHour * 60 + m, setAtMs: Date.now() };
       renderBoard();
     }
-  });
-  els.typeFilter.addEventListener('change', (e) => {
-    state.typeFilter = e.target.value;
-    renderBoard();
-  });
-  els.destFilter.addEventListener('change', (e) => {
-    state.destFilter = e.target.value;
-    renderBoard();
   });
 
   // 発車案内の行クリックで、その列車単体の時刻表を開く
@@ -415,9 +409,14 @@ async function loadOudFile(path) {
     state.timetable = timetable;
     state.diaIndex = 0;
     state.stationIndex = 0;
+    state.typeFiltersChecked = new Set();
+    state.typeFiltersKnown = new Set();
+    state.destFiltersChecked = new Set();
+    state.destFiltersKnown = new Set();
 
     populateDiaSelect(timetable.dias);
     populateStationSelect(timetable.stations);
+    populateFilterOptions(); // 種別・行先チェックボックスの初期値(全チェック)を用意しておく
 
     renderBoard();
   } catch (err) {
@@ -481,10 +480,12 @@ function renderBoard() {
   }
 }
 
-function collectStationDepartures() {
+function collectStationDepartures(opts) {
+  const ignoreFilters = !!(opts && opts.ignoreFilters);
   const dia = state.timetable.dias[state.diaIndex];
   if (!dia) return [];
   const stIndex = state.stationIndex;
+  const stationName = state.timetable.stations[stIndex]?.name || '';
   const trains = [];
 
   const pools = [];
@@ -498,13 +499,15 @@ function collectStationDepartures() {
     if (stop.flag === '2') continue; // 通過(停車しない)駅では乗車できないため案内しない
     if (!stop.dep) continue; // 発車が無い(到着のみ = 終着・降車専用)駅はここでは案内しない
     const dep = stop.dep;
-    if (state.typeFilter && typeKey(train) !== state.typeFilter) continue;
-    if (state.destFilter && train.destinationName !== state.destFilter) continue;
+    const displayType = displayTypeForStation(train, stationName);
+    if (!ignoreFilters && !state.typeFiltersChecked.has(displayType)) continue;
+    if (!ignoreFilters && !state.destFiltersChecked.has(train.destinationName)) continue;
     trains.push({
       train,
       stop,
       departMinutes: dep.totalMinutes,
       departLabel: dep.label,
+      displayType,
     });
   }
 
@@ -512,30 +515,51 @@ function collectStationDepartures() {
   return trains;
 }
 
-/** 種別・行先フィルターのプルダウンを、現在の駅・ダイヤ・方向における実際の値で埋める */
-function populateFilterOptions() {
-  const savedType = state.typeFilter;
-  const savedDest = state.destFilter;
-  const prevTypeFilter = state.typeFilter;
-  const prevDestFilter = state.destFilter;
-  state.typeFilter = '';
-  state.destFilter = '';
-  const base = collectStationDepartures();
-  state.typeFilter = prevTypeFilter;
-  state.destFilter = prevDestFilter;
+/** 初めて登場した値をデフォルトでチェック済みにする */
+function ensureFilterDefaults(knownSet, checkedSet, values) {
+  values.forEach((v) => {
+    if (!knownSet.has(v)) {
+      knownSet.add(v);
+      checkedSet.add(v);
+    }
+  });
+}
 
-  const types = [...new Set(base.map((d) => typeKey(d.train)).filter(Boolean))].sort();
+/** 種別・行先フィルターのチェックボックスを、現在の駅・ダイヤ・方向における実際の値で埋める */
+function populateFilterOptions() {
+  const base = collectStationDepartures({ ignoreFilters: true });
+  const stationName = state.timetable.stations[state.stationIndex]?.name || '';
+
+  const types = [...new Set(base.map((d) => d.displayType).filter(Boolean))].sort();
   const dests = [...new Set(base.map((d) => d.train.destinationName).filter(Boolean))].sort();
 
-  els.typeFilter.innerHTML = '<option value="">すべての種別</option>'
-    + types.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-  els.destFilter.innerHTML = '<option value="">すべての行先</option>'
-    + dests.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+  ensureFilterDefaults(state.typeFiltersKnown, state.typeFiltersChecked, types);
+  ensureFilterDefaults(state.destFiltersKnown, state.destFiltersChecked, dests);
 
-  els.typeFilter.value = types.includes(savedType) ? savedType : '';
-  els.destFilter.value = dests.includes(savedDest) ? savedDest : '';
-  state.typeFilter = els.typeFilter.value;
-  state.destFilter = els.destFilter.value;
+  renderCheckboxGroup(els.typeFilter, types, state.typeFiltersChecked, (value, checked) => {
+    if (checked) state.typeFiltersChecked.add(value); else state.typeFiltersChecked.delete(value);
+    renderBoard();
+  });
+  renderCheckboxGroup(els.destFilter, dests, state.destFiltersChecked, (value, checked) => {
+    if (checked) state.destFiltersChecked.add(value); else state.destFiltersChecked.delete(value);
+    renderBoard();
+  });
+}
+
+/** チェックボックス群を描画する(共通ヘルパー) */
+function renderCheckboxGroup(container, values, checkedSet, onChange) {
+  if (!container) return;
+  container.innerHTML = values.map((v, i) => {
+    const id = `${container.id}-${i}`;
+    const isChecked = checkedSet.has(v);
+    return `<label class="checkbox-pill${isChecked ? ' is-checked' : ''}" for="${id}"><input type="checkbox" id="${id}" value="${escapeHtml(v)}"${isChecked ? ' checked' : ''}><span>${escapeHtml(v)}</span></label>`;
+  }).join('');
+  container.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      input.closest('.checkbox-pill').classList.toggle('is-checked', input.checked);
+      onChange(input.value, input.checked);
+    });
+  });
 }
 
 function renderRealtimeBoard() {
@@ -560,31 +584,46 @@ function renderRealtimeBoard() {
   // 3枠は常に確保し、以降の列車が無い枠は空欄コマとして表示する
   const slots = [0, 1, 2].map((i) => upcoming[i] || null);
 
-  updateFlapSign(slots);
+  updateFlapSign(slots, stationName);
 }
 
 /** パタパタ(反転フラップ)式サイン: 列車接近の案内はせず、既定コマの範囲のみ表示する */
-function flapSignHtml(slots) {
+function flapSignHtml(slots, stationName) {
   return `
     <div class="flap-sign">
       <div class="flap-sign-header">
         <span class="flap-h">時刻</span><span class="flap-h">種別</span><span class="flap-h">行先</span>
       </div>
       <div class="flap-sign-body">
-        ${slots.map((d) => flapRowHtml(d)).join('')}
+        ${slots.map((d) => flapRowHtml(d, stationName)).join('')}
       </div>
     </div>
   `;
 }
 
+/**
+ * 「船渡川から普通 特急」のように種別が区間によって変わる列車は、
+ * 指定した駅ではその区間での実際の種別(例: 普通)として表示する。
+ */
+const TYPE_STATION_OVERRIDES = {
+  '船渡川から普通 特急': { stations: ['船渡川', '南ヶ丘', '茶志内'], showAs: '普通' },
+};
+
+function displayTypeForStation(train, stationName) {
+  const base = typeKey(train);
+  const override = TYPE_STATION_OVERRIDES[base];
+  if (override && stationName && override.stations.includes(stationName)) {
+    return override.showAs;
+  }
+  return base;
+}
+
 /** この行が目指すべき、各リールの目標コマ番号。dが無い(空枠)場合は全て空欄コマを目指す。 */
-function flapTargetIndices(d) {
+function flapTargetIndices(d, stationName) {
   if (!d) {
     return {
-      hourTens: flapReelIndexFor(FLAP_REEL.hourTens, ''),
-      hourOnes: flapReelIndexFor(FLAP_REEL.hourOnes, ''),
-      minuteTens: flapReelIndexFor(FLAP_REEL.minuteTens, ''),
-      minuteOnes: flapReelIndexFor(FLAP_REEL.minuteOnes, ''),
+      hour: flapReelIndexFor(FLAP_REEL.hour, ''),
+      minute: flapReelIndexFor(FLAP_REEL.minute, ''),
       type: flapReelIndexFor(FLAP_REEL.type, ''),
       dest: flapReelIndexFor(FLAP_REEL.dest, ''),
     };
@@ -594,11 +633,9 @@ function flapTargetIndices(d) {
   const hourStr = dep && dep.hour <= FLAP_MAX_HOUR ? String(dep.hour).padStart(2, '0') : '';
   const minStr = dep ? String(dep.minute).padStart(2, '0') : '';
   return {
-    hourTens: flapReelIndexFor(FLAP_REEL.hourTens, hourStr ? hourStr[0] : ''),
-    hourOnes: flapReelIndexFor(FLAP_REEL.hourOnes, hourStr ? hourStr[1] : ''),
-    minuteTens: flapReelIndexFor(FLAP_REEL.minuteTens, minStr ? minStr[0] : ''),
-    minuteOnes: flapReelIndexFor(FLAP_REEL.minuteOnes, minStr ? minStr[1] : ''),
-    type: flapReelIndexFor(FLAP_REEL.type, typeKey(train)),
+    hour: flapReelIndexFor(FLAP_REEL.hour, hourStr),
+    minute: flapReelIndexFor(FLAP_REEL.minute, minStr),
+    type: flapReelIndexFor(FLAP_REEL.type, displayTypeForStation(train, stationName)),
     dest: flapReelIndexFor(FLAP_REEL.dest, train.destinationName),
   };
 }
@@ -625,16 +662,16 @@ function halvesHtml(value) {
     + `<span class="flap-static flap-static-bottom"><span class="flap-static-inner">${escaped}</span></span>`;
 }
 
-function flapRowHtml(d) {
-  const t = flapTargetIndices(d);
+function flapRowHtml(d, stationName) {
+  const t = flapTargetIndices(d, stationName);
   const isEmpty = !d;
-  const typeColorStyle = d ? getFlapTypeStyle(typeKey(d.train)) : '';
+  const typeColorStyle = d ? getFlapTypeStyle(displayTypeForStation(d.train, stationName)) : '';
   return `
     <div class="flap-row ${isEmpty ? 'is-empty' : ''}" data-train-key="${d ? d.train.key : ''}" tabindex="0">
       <div class="flap-time">
-        <div class="flap-hour-box">${flapTile('flap-digit flap-h-tens', 'hourTens', t.hourTens)}${flapTile('flap-digit flap-h-ones', 'hourOnes', t.hourOnes)}</div>
+        <div class="flap-hour-box">${flapTile('flap-digit', 'hour', t.hour)}</div>
         <span class="flap-colon">:</span>
-        <div class="flap-minute-box">${flapTile('flap-digit flap-m-tens', 'minuteTens', t.minuteTens)}${flapTile('flap-digit flap-m-ones', 'minuteOnes', t.minuteOnes)}</div>
+        <div class="flap-minute-box">${flapTile('flap-digit', 'minute', t.minute)}</div>
       </div>
       ${flapTile('flap-type', 'type', t.type, typeColorStyle)}
       ${flapTile('flap-dest', 'dest', t.dest)}
@@ -643,9 +680,9 @@ function flapRowHtml(d) {
 }
 
 /** パタパタサインを差分更新し、コマがズレているリールだけ目標コマまで1つずつめくる */
-function updateFlapSign(slots) {
+function updateFlapSign(slots, stationName) {
   if (!els.board.querySelector('.flap-sign')) {
-    els.board.innerHTML = flapSignHtml(slots);
+    els.board.innerHTML = flapSignHtml(slots, stationName);
     return;
   }
   const rows = els.board.querySelectorAll('.flap-row');
@@ -654,14 +691,12 @@ function updateFlapSign(slots) {
     if (!rowEl) return;
     rowEl.classList.toggle('is-empty', !d);
     rowEl.dataset.trainKey = d ? d.train.key : '';
-    const t = flapTargetIndices(d);
-    flipReelTo(rowEl.querySelector('.flap-h-tens'), t.hourTens);
-    flipReelTo(rowEl.querySelector('.flap-h-ones'), t.hourOnes);
-    flipReelTo(rowEl.querySelector('.flap-m-tens'), t.minuteTens);
-    flipReelTo(rowEl.querySelector('.flap-m-ones'), t.minuteOnes);
+    const t = flapTargetIndices(d, stationName);
+    flipReelTo(rowEl.querySelector('.flap-hour'), t.hour);
+    flipReelTo(rowEl.querySelector('.flap-minute'), t.minute);
 
     const typeTile = rowEl.querySelector('.flap-type');
-    if (typeTile) typeTile.style.cssText = d ? getFlapTypeStyle(typeKey(d.train)) : '';
+    if (typeTile) typeTile.style.cssText = d ? getFlapTypeStyle(displayTypeForStation(d.train, stationName)) : '';
     flipReelTo(typeTile, t.type);
     flipReelTo(rowEl.querySelector('.flap-dest'), t.dest);
   });
@@ -781,14 +816,18 @@ function renderTimetableBrowser() {
           </tr>
         </thead>
         <tbody>
-          ${all.map((d) => `
+          ${all.map((d) => {
+            const displayType = displayTypeForStation(d.train, stationName);
+            const chipColor = TYPE_COLOR_OVERRIDES[displayType] || d.train.typeColor || DEFAULT_TYPE_COLOR;
+            return `
             <tr data-train-key="${d.train.key}" tabindex="0">
-              <td class="col-type"><span class="dep-badge dep-badge-inline" style="--chip-color:${getTypeColor(d.train)}">${escapeHtml(typeKey(d.train) || '普通')}</span></td>
+              <td class="col-type"><span class="dep-badge dep-badge-inline" style="--chip-color:${chipColor}">${escapeHtml(displayType || '普通')}</span></td>
               <td class="col-dest"><span class="dep-dest-inline">${escapeHtml(d.train.destinationName || '-')}</span><span class="train-number">${d.train.number ? ' ' + escapeHtml(d.train.number) : ''}</span></td>
               <td class="col-time"><span class="dep-time-inline">${d.departLabel}</span></td>
               <td class="col-dir"><span class="dir-badge dir-${d.train.direction}">${d.train.direction === 'Kudari' ? '下り' : '上り'}</span></td>
             </tr>
-          `).join('')}
+          `;
+          }).join('')}
         </tbody>
       </table>
     </div>

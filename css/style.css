@@ -125,6 +125,36 @@ body {
   font-family: var(--font-display);
 }
 
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 480px;
+}
+.checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--divider);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 13px;
+  color: var(--ink-main);
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox-pill input[type="checkbox"] {
+  accent-color: var(--line-blue);
+  margin: 0;
+}
+.checkbox-pill:has(input:checked),
+.checkbox-pill.is-checked {
+  background: var(--line-blue);
+  border-color: var(--line-blue);
+  color: #fff;
+}
+
 select, input[type="time"] {
   background: var(--bg-panel-raised);
   border: 1px solid var(--divider);
@@ -132,8 +162,7 @@ select, input[type="time"] {
   border-radius: 8px;
   padding: 8px 10px;
   font-family: var(--font-jp);
-  font-size: 14px;
-}
+  font-size: 14px;}
 select:focus, input:focus, button:focus {
   outline: 2px solid var(--line-blue);
   outline-offset: 1px;
