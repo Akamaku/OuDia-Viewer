@@ -668,9 +668,9 @@ function flapRowHtml(d, stationName) {
   return `
     <div class="flap-row ${isEmpty ? 'is-empty' : ''}" data-train-key="${d ? d.train.key : ''}" tabindex="0">
       <div class="flap-time">
-        <div class="flap-hour-box">${flapTile('flap-digit', 'hour', t.hour)}</div>
+        <div class="flap-hour-box">${flapTile('flap-digit flap-hour', 'hour', t.hour)}</div>
         <span class="flap-colon">:</span>
-        <div class="flap-minute-box">${flapTile('flap-digit', 'minute', t.minute)}</div>
+        <div class="flap-minute-box">${flapTile('flap-digit flap-minute', 'minute', t.minute)}</div>
       </div>
       ${flapTile('flap-type', 'type', t.type, typeColorStyle)}
       ${flapTile('flap-dest', 'dest', t.dest)}
