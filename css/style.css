@@ -128,31 +128,28 @@ body {
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px 16px;
   max-width: 480px;
-}
-.checkbox-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   background: var(--bg-panel-raised);
   border: 1px solid var(--divider);
-  border-radius: 999px;
-  padding: 5px 11px;
-  font-size: 13px;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.checkbox-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
   color: var(--ink-main);
   cursor: pointer;
   user-select: none;
 }
-.checkbox-pill input[type="checkbox"] {
+.checkbox-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
   accent-color: var(--line-blue);
   margin: 0;
-}
-.checkbox-pill:has(input:checked),
-.checkbox-pill.is-checked {
-  background: var(--line-blue);
-  border-color: var(--line-blue);
-  color: #fff;
+  cursor: pointer;
 }
 
 select, input[type="time"] {

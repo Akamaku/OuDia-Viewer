@@ -552,11 +552,10 @@ function renderCheckboxGroup(container, values, checkedSet, onChange) {
   container.innerHTML = values.map((v, i) => {
     const id = `${container.id}-${i}`;
     const isChecked = checkedSet.has(v);
-    return `<label class="checkbox-pill${isChecked ? ' is-checked' : ''}" for="${id}"><input type="checkbox" id="${id}" value="${escapeHtml(v)}"${isChecked ? ' checked' : ''}><span>${escapeHtml(v)}</span></label>`;
+    return `<label class="checkbox-item" for="${id}"><input type="checkbox" id="${id}" value="${escapeHtml(v)}"${isChecked ? ' checked' : ''}><span>${escapeHtml(v)}</span></label>`;
   }).join('');
   container.querySelectorAll('input[type="checkbox"]').forEach((input) => {
     input.addEventListener('change', () => {
-      input.closest('.checkbox-pill').classList.toggle('is-checked', input.checked);
       onChange(input.value, input.checked);
     });
   });
