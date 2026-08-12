@@ -280,7 +280,7 @@ select:focus, input:focus, button:focus {
   text-transform: uppercase;
   color: #8b93a0;
 }
-.flap-h:nth-child(1) { flex: 0 0 190px; }
+.flap-h:nth-child(1) { flex: 0 0 250px; }
 .flap-h:nth-child(2) { flex: 0 0 140px; }
 .flap-h:nth-child(3) { flex: 1; }
 
@@ -295,14 +295,16 @@ select:focus, input:focus, button:focus {
   cursor: pointer;
 }
 .flap-time {
-  flex: 0 0 190px;
+  flex: 0 0 250px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 } /* 時|:|分 のように、時と分をそれぞれ独立した枠にまとめる */
 .flap-hour-box,
 .flap-minute-box {
   display: flex;
+  flex: 1;
+  justify-content: center;
   background: #0c0d0e;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.4);
   height: var(--flap-tile-h);
@@ -311,6 +313,7 @@ select:focus, input:focus, button:focus {
 .flap-minute-box .flap-tile {
   background: transparent;
   box-shadow: none;
+  width: 100%;
 }
 .flap-colon {
   color: #f2d9a0;
@@ -445,9 +448,9 @@ select:focus, input:focus, button:focus {
 .flap-row.is-empty .flap-static-inner { color: transparent; }
 
 .flap-digit {
-  width: 40px;
+  width: 90px;
   height: 68px;
-  font-size: 36px;
+  font-size: 42px;
   font-variant-numeric: tabular-nums;
 }
 .flap-type {
@@ -509,10 +512,10 @@ select:focus, input:focus, button:focus {
 
 @media (max-width: 760px) {
   .flap-sign { --flap-tile-h: 54px; }
-  .flap-h:nth-child(1) { flex-basis: 138px; }
+  .flap-h:nth-child(1) { flex-basis: 180px; }
   .flap-h:nth-child(2), .flap-type { flex-basis: 96px; }
-  .flap-time { flex-basis: 138px; }
-  .flap-digit { width: 30px; height: 54px; font-size: 26px; }
+  .flap-time { flex-basis: 180px; }
+  .flap-digit { width: 62px; height: 54px; font-size: 30px; }
   .flap-type { font-size: 20px; }
   .flap-dest { font-size: 22px; }
 }
