@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>発車案内 — OuDia Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-top">
+    <div class="brand">
+      <span class="brand-eyebrow">Departure Board / OuDia Viewer</span>
+      <h1 class="brand-title">発車案内</h1>
+    </div>
+    <div class="header-clock" id="header-clock">--:--:--</div>
+  </div>
+</header>
+
+<section class="controls">
+  <div class="field">
+    <label for="file-select">路線ファイル</label>
+    <select id="file-select"></select>
+  </div>
+  <div class="field">
+    <label for="dia-select">ダイヤ</label>
+    <select id="dia-select"></select>
+  </div>
+  <div class="field">
+    <label for="station-select">駅</label>
+    <select id="station-select"></select>
+  </div>
+  <div class="field">
+    <label>方向</label>
+    <div class="segmented">
+      <button type="button" data-direction="all" class="is-active">すべて</button>
+      <button type="button" data-direction="Kudari">下り</button>
+      <button type="button" data-direction="Nobori">上り</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>表示モード</label>
+    <div class="segmented">
+      <button type="button" data-view="realtime" class="is-active">リアルタイム</button>
+      <button type="button" data-view="browser">時刻表</button>
+    </div>
+  </div>
+  <div class="field">
+    <label class="toggle-field">
+      <input type="checkbox" id="use-now-toggle" checked>
+      現在時刻を使用
+    </label>
+    <div class="field is-hidden" id="manual-clock-wrap">
+      <input type="time" id="manual-clock" value="08:00">
+    </div>
+  </div>
+</section>
+
+<section class="controls is-hidden" id="filter-controls">
+  <div class="field">
+    <label for="type-filter">種別で絞り込み</label>
+    <select id="type-filter">
+      <option value="">すべての種別</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="dest-filter">行先で絞り込み</label>
+    <select id="dest-filter">
+      <option value="">すべての行先</option>
+    </select>
+  </div>
+</section>
+
+<div class="status-bar is-hidden" id="status-bar">
+  <span id="status-line" data-level="info"></span>
+</div>
+
+<main class="board-frame">
+  <div id="board"></div>
+  <div id="empty-state" class="empty-state is-hidden">データがありません</div>
+</main>
+
+<div class="modal-overlay is-hidden" id="train-modal-overlay">
+  <div class="modal-panel" id="train-modal-panel"></div>
+</div>
+
+<script src="js/oudia-parser.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
