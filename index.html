@@ -47,6 +47,7 @@
     <div class="segmented">
       <button type="button" data-view="realtime" class="is-active">リアルタイム</button>
       <button type="button" data-view="browser">時刻表</button>
+      <button type="button" data-view="diagram">ダイヤグラム</button>
     </div>
   </div>
   <div class="field">
@@ -68,6 +69,27 @@
   <div class="field">
     <label>行先で絞り込み</label>
     <div class="checkbox-group" id="dest-filter"></div>
+  </div>
+</section>
+
+<section class="controls is-hidden" id="diagram-controls">
+  <div class="field">
+    <label>横(時間)の拡大縮小</label>
+    <div class="segmented">
+      <button type="button" id="diagram-zoom-x-out">−</button>
+      <button type="button" id="diagram-zoom-x-in">＋</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>縦(駅)の拡大縮小</label>
+    <div class="segmented">
+      <button type="button" id="diagram-zoom-y-out">−</button>
+      <button type="button" id="diagram-zoom-y-in">＋</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>&nbsp;</label>
+    <button type="button" class="fullscreen-btn" id="diagram-fullscreen">⛶ 全画面表示</button>
   </div>
 </section>
 

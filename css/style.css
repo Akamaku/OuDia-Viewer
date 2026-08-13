@@ -699,6 +699,73 @@ select:focus, input:focus, button:focus {
 .modal-table tr.row-terminal td { font-weight: 700; }
 .modal-table .col-pass { color: var(--ink-faint); font-size: 12.5px; }
 
+/* ---------- ダイヤグラム(スジ図) ---------- */
+.fullscreen-btn {
+  background: var(--line-blue);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: var(--font-jp);
+  cursor: pointer;
+}
+.fullscreen-btn:hover { background: var(--line-blue-ink); }
+
+.diagram-wrap {
+  background: #14181f;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.diagram-wrap:fullscreen {
+  background: #14181f;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 16px;
+}
+.diagram-wrap:fullscreen .diagram-scroll { flex: 1; }
+.diagram-scroll {
+  overflow: auto;
+  max-height: 78vh;
+}
+.diagram-svg {
+  display: block;
+  background: #14181f;
+}
+.diagram-station-line {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
+}
+.diagram-station-label {
+  fill: #c7cedb;
+  font-family: var(--font-jp);
+  font-size: 12px;
+}
+.diagram-time-line {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1;
+}
+.diagram-time-line.is-hour {
+  stroke: rgba(255, 255, 255, 0.16);
+}
+.diagram-time-label {
+  fill: #8b93a0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.diagram-train-line {
+  fill: none;
+  stroke-width: 1.6;
+  opacity: 0.9;
+  cursor: pointer;
+  transition: stroke-width 0.1s, opacity 0.1s;
+}
+.diagram-train-line:hover {
+  stroke-width: 3.2;
+  opacity: 1;
+}
+
 /* ---------- レスポンシブ ---------- */
 @media (max-width: 640px) {
   .controls { flex-direction: column; align-items: stretch; }
