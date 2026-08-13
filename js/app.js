@@ -196,6 +196,7 @@ function cacheElements() {
   els.typeFilter = document.getElementById('type-filter');
   els.destFilter = document.getElementById('dest-filter');
   els.diagramControls = document.getElementById('diagram-controls');
+  els.directionField = document.getElementById('direction-field');
   els.diagramZoomXIn = document.getElementById('diagram-zoom-x-in');
   els.diagramZoomXOut = document.getElementById('diagram-zoom-x-out');
   els.diagramZoomYIn = document.getElementById('diagram-zoom-y-in');
@@ -230,6 +231,7 @@ function bindEvents() {
       document.body.classList.toggle('mode-browser', state.viewMode === 'browser');
       els.filterControls.classList.toggle('is-hidden', state.viewMode === 'realtime');
       els.diagramControls.classList.toggle('is-hidden', state.viewMode !== 'diagram');
+      els.directionField.classList.toggle('is-hidden', state.viewMode === 'diagram');
       renderBoard();
     });
   });
@@ -541,14 +543,12 @@ function ensureFilterDefaults(knownSet, checkedSet, values) {
   });
 }
 
-/** 現在のダイヤ全体(方向フィルタのみ反映、駅は問わない)の列車一覧。ダイヤグラム表示用。 */
+/** 現在のダイヤ全体の列車一覧(上り・下り両方、駅は問わない)。ダイヤグラム表示用。
+ *  ダイヤグラムは方向フィルタの影響を受けず、常に両方向をまとめて対象にする。 */
 function collectDiaTrains() {
   const dia = state.timetable.dias[state.diaIndex];
   if (!dia) return [];
-  const pools = [];
-  if (state.directionFilter === 'all' || state.directionFilter === 'Kudari') pools.push(...dia.kudari);
-  if (state.directionFilter === 'all' || state.directionFilter === 'Nobori') pools.push(...dia.nobori);
-  return pools.filter((train) => !HIDDEN_TYPES.includes(train.typeName));
+  return [...dia.kudari, ...dia.nobori].filter((train) => !HIDDEN_TYPES.includes(train.typeName));
 }
 
 /** 種別・行先フィルターのチェックボックスを、現在の表示モードに応じた実際の値で埋める */
@@ -875,6 +875,7 @@ function escapeHtml(str) {
  * 横軸=時間、縦軸=駅。上り・下りを分けず、同じ図の中に重ねて描く。
  * ============================================================ */
 const DIAGRAM_BASE_PX_PER_MIN = 3.2; // 横方向の基準スケール(拡大率1のとき)
+const DIAGRAM_DEFAULT_LINE_COLOR = '#1a1a1a'; // 色指定の無い種別(主に普通)は黒で描く(実物のダイヤグラム風)
 const DIAGRAM_BASE_STATION_GAP = 46; // 縦方向の基準スケール(拡大率1のとき、駅間の間隔px)
 const DIAGRAM_ZOOM_STEP = 1.25;
 const DIAGRAM_ZOOM_MIN = 0.3;
@@ -968,6 +969,7 @@ function renderDiagram() {
 
   // 各列車の筋(上り・下りを分けず同じ図に重ねて描く)
   let linesHtml = '';
+  let labelsHtml = '';
   trains.forEach((train) => {
     const pts = [];
     train.stops.forEach((stop, i) => {
@@ -976,10 +978,20 @@ function renderDiagram() {
       if (stop.dep) pts.push([xOf(stop.dep.totalMinutes), yOf(i)]);
     });
     if (pts.length < 2) return;
-    const color = TYPE_COLOR_OVERRIDES[typeKey(train)] || DEFAULT_TYPE_COLOR;
+    const type = typeKey(train);
+    const color = (type === '普通' ? null : TYPE_COLOR_OVERRIDES[type]) || DIAGRAM_DEFAULT_LINE_COLOR;
+    const dash = type === 'ライナー' ? ' stroke-dasharray="6 4"' : '';
     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    const label = `${train.number || ''}`.trim();
-    linesHtml += `<path class="diagram-train-line" d="${d}" stroke="${color}" data-train-key="${train.key}"><title>${escapeHtml(typeKey(train))} ${escapeHtml(train.destinationName)} ${escapeHtml(label)}</title></path>`;
+    linesHtml += `<path class="diagram-train-line" d="${d}" stroke="${color}"${dash} data-train-key="${train.key}"><title>${escapeHtml(type)} ${escapeHtml(train.destinationName)} ${escapeHtml(train.number || '')}</title></path>`;
+
+    // 列車番号(ライナー等は種別名も添えて)のラベルを、筋の傾きに沿わせて表示する
+    const label = (type === 'ライナー' || type === '特急') ? `${train.number || ''} ${type}`.trim() : (train.number || '');
+    if (label) {
+      const [x0, y0] = pts[0];
+      const [x1, y1] = pts[1];
+      const angle = Math.atan2(y1 - y0, x1 - x0) * (180 / Math.PI);
+      labelsHtml += `<text class="diagram-train-label" x="${x0.toFixed(1)}" y="${(y0 - 5).toFixed(1)}" fill="${color}" transform="rotate(${angle.toFixed(1)} ${x0.toFixed(1)} ${(y0 - 5).toFixed(1)})">${escapeHtml(label)}</text>`;
+    }
   });
 
   els.board.innerHTML = `
@@ -988,6 +1000,7 @@ function renderDiagram() {
         <svg class="diagram-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
           <g class="diagram-grid">${gridHtml}${timeGridHtml}</g>
           <g class="diagram-lines">${linesHtml}</g>
+          <g class="diagram-labels">${labelsHtml}</g>
         </svg>
       </div>
     </div>

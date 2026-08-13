@@ -713,12 +713,13 @@ select:focus, input:focus, button:focus {
 .fullscreen-btn:hover { background: var(--line-blue-ink); }
 
 .diagram-wrap {
-  background: #14181f;
+  background: #ffffff;
+  border: 1px solid var(--divider);
   border-radius: 12px;
   overflow: hidden;
 }
 .diagram-wrap:fullscreen {
-  background: #14181f;
+  background: #ffffff;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
@@ -731,39 +732,46 @@ select:focus, input:focus, button:focus {
 }
 .diagram-svg {
   display: block;
-  background: #14181f;
+  background: #ffffff;
 }
 .diagram-station-line {
-  stroke: rgba(255, 255, 255, 0.14);
+  stroke: #b9bfc9;
   stroke-width: 1;
 }
 .diagram-station-label {
-  fill: #c7cedb;
+  fill: #1a1a1a;
   font-family: var(--font-jp);
   font-size: 12px;
+  font-weight: 500;
 }
 .diagram-time-line {
-  stroke: rgba(255, 255, 255, 0.06);
+  stroke: #e4e7ec;
   stroke-width: 1;
 }
 .diagram-time-line.is-hour {
-  stroke: rgba(255, 255, 255, 0.16);
+  stroke: #9aa1ac;
 }
 .diagram-time-label {
-  fill: #8b93a0;
+  fill: #4b5563;
   font-family: var(--font-mono);
   font-size: 11px;
 }
 .diagram-train-line {
   fill: none;
-  stroke-width: 1.6;
-  opacity: 0.9;
+  stroke-width: 1.1;
+  opacity: 0.92;
   cursor: pointer;
   transition: stroke-width 0.1s, opacity 0.1s;
 }
 .diagram-train-line:hover {
-  stroke-width: 3.2;
+  stroke-width: 2.6;
   opacity: 1;
+}
+.diagram-train-label {
+  font-family: var(--font-jp);
+  font-size: 9.5px;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* ---------- レスポンシブ ---------- */
