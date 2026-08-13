@@ -14,21 +14,15 @@ const state = {
   stationIndex: 0,
   directionFilter: 'all', // 'all' | 'Kudari' | 'Nobori'
   viewMode: 'realtime', // 'realtime' | 'browser'
+  signStyle: 'flap', // 'flap' | 'lcd' (リアルタイム表示のサインの種類)
   useNow: true,
   manualClock: null, // {hour, minute}
   // 種別・行先の絞り込み(チェックボックス式)。チェックが入っている値だけを表示する。
   // 初めて登場した値はデフォルトでチェック済みにする(typeFiltersKnown/destFiltersKnownで既知かどうかを管理)。
-  // 時刻表(駅ごと)とダイヤグラム(全体・両方向)は前提が異なるため、フィルター状態は別々に持つ。
   typeFiltersChecked: new Set(),
   typeFiltersKnown: new Set(),
   destFiltersChecked: new Set(),
   destFiltersKnown: new Set(),
-  diagramTypeFiltersChecked: new Set(),
-  diagramTypeFiltersKnown: new Set(),
-  diagramDestFiltersChecked: new Set(),
-  diagramDestFiltersKnown: new Set(),
-  diagramScaleX: 1,
-  diagramScaleY: 1,
 };
 
 const FLAP_ROW_COUNT = 3; // 発車案内の表示段数
@@ -200,13 +194,8 @@ function cacheElements() {
   els.filterControls = document.getElementById('filter-controls');
   els.typeFilter = document.getElementById('type-filter');
   els.destFilter = document.getElementById('dest-filter');
-  els.diagramControls = document.getElementById('diagram-controls');
-  els.directionField = document.getElementById('direction-field');
-  els.diagramZoomXIn = document.getElementById('diagram-zoom-x-in');
-  els.diagramZoomXOut = document.getElementById('diagram-zoom-x-out');
-  els.diagramZoomYIn = document.getElementById('diagram-zoom-y-in');
-  els.diagramZoomYOut = document.getElementById('diagram-zoom-y-out');
-  els.diagramFullscreen = document.getElementById('diagram-fullscreen');
+  els.signStyleField = document.getElementById('sign-style-field');
+  els.signStyleButtons = document.querySelectorAll('[data-sign-style]');
 }
 
 function bindEvents() {
@@ -235,16 +224,17 @@ function bindEvents() {
       els.viewButtons.forEach((b) => b.classList.toggle('is-active', b === btn));
       document.body.classList.toggle('mode-browser', state.viewMode === 'browser');
       els.filterControls.classList.toggle('is-hidden', state.viewMode === 'realtime');
-      els.diagramControls.classList.toggle('is-hidden', state.viewMode !== 'diagram');
-      els.directionField.classList.toggle('is-hidden', state.viewMode === 'diagram');
+      els.signStyleField.classList.toggle('is-hidden', state.viewMode !== 'realtime');
       renderBoard();
     });
   });
-  els.diagramZoomXIn.addEventListener('click', () => zoomDiagram('x', 1));
-  els.diagramZoomXOut.addEventListener('click', () => zoomDiagram('x', -1));
-  els.diagramZoomYIn.addEventListener('click', () => zoomDiagram('y', 1));
-  els.diagramZoomYOut.addEventListener('click', () => zoomDiagram('y', -1));
-  els.diagramFullscreen.addEventListener('click', toggleDiagramFullscreen);
+  els.signStyleButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.signStyle = btn.dataset.signStyle;
+      els.signStyleButtons.forEach((b) => b.classList.toggle('is-active', b === btn));
+      renderBoard();
+    });
+  });
   els.useNowToggle.addEventListener('change', (e) => {
     state.useNow = e.target.checked;
     els.manualClockWrap.classList.toggle('is-hidden', state.useNow);
@@ -434,10 +424,6 @@ async function loadOudFile(path) {
     state.typeFiltersKnown = new Set();
     state.destFiltersChecked = new Set();
     state.destFiltersKnown = new Set();
-    state.diagramTypeFiltersChecked = new Set();
-    state.diagramTypeFiltersKnown = new Set();
-    state.diagramDestFiltersChecked = new Set();
-    state.diagramDestFiltersKnown = new Set();
 
     populateDiaSelect(timetable.dias);
     populateStationSelect(timetable.stations);
@@ -500,8 +486,6 @@ function renderBoard() {
 
   if (state.viewMode === 'realtime') {
     renderRealtimeBoard();
-  } else if (state.viewMode === 'diagram') {
-    renderDiagram();
   } else {
     renderTimetableBrowser();
   }
@@ -552,42 +536,21 @@ function ensureFilterDefaults(knownSet, checkedSet, values) {
   });
 }
 
-/** 現在のダイヤ全体の列車一覧(上り・下り両方、駅は問わない)。ダイヤグラム表示用。
- *  ダイヤグラムは方向フィルタの影響を受けず、常に両方向をまとめて対象にする。 */
-function collectDiaTrains() {
-  const dia = state.timetable.dias[state.diaIndex];
-  if (!dia) return [];
-  return [...dia.kudari, ...dia.nobori].filter((train) => !HIDDEN_TYPES.includes(train.typeName));
-}
-
-/** 種別・行先フィルターのチェックボックスを、現在の表示モードに応じた実際の値で埋める */
+/** 種別・行先フィルターのチェックボックスを、現在の駅・ダイヤ・方向における実際の値で埋める */
 function populateFilterOptions() {
-  const isDiagram = state.viewMode === 'diagram';
-  const typeChecked = isDiagram ? state.diagramTypeFiltersChecked : state.typeFiltersChecked;
-  const typeKnown = isDiagram ? state.diagramTypeFiltersKnown : state.typeFiltersKnown;
-  const destChecked = isDiagram ? state.diagramDestFiltersChecked : state.destFiltersChecked;
-  const destKnown = isDiagram ? state.diagramDestFiltersKnown : state.destFiltersKnown;
+  const base = collectStationDepartures({ ignoreFilters: true });
+  const types = [...new Set(base.map((d) => d.displayType).filter(Boolean))].sort();
+  const dests = [...new Set(base.map((d) => d.train.destinationName).filter(Boolean))].sort();
 
-  let types, dests;
-  if (isDiagram) {
-    const trains = collectDiaTrains();
-    types = [...new Set(trains.map((t) => typeKey(t)).filter(Boolean))].sort();
-    dests = [...new Set(trains.map((t) => t.destinationName).filter(Boolean))].sort();
-  } else {
-    const base = collectStationDepartures({ ignoreFilters: true });
-    types = [...new Set(base.map((d) => d.displayType).filter(Boolean))].sort();
-    dests = [...new Set(base.map((d) => d.train.destinationName).filter(Boolean))].sort();
-  }
+  ensureFilterDefaults(state.typeFiltersKnown, state.typeFiltersChecked, types);
+  ensureFilterDefaults(state.destFiltersKnown, state.destFiltersChecked, dests);
 
-  ensureFilterDefaults(typeKnown, typeChecked, types);
-  ensureFilterDefaults(destKnown, destChecked, dests);
-
-  renderCheckboxGroup(els.typeFilter, types, typeChecked, (value, checked) => {
-    if (checked) typeChecked.add(value); else typeChecked.delete(value);
+  renderCheckboxGroup(els.typeFilter, types, state.typeFiltersChecked, (value, checked) => {
+    if (checked) state.typeFiltersChecked.add(value); else state.typeFiltersChecked.delete(value);
     renderBoard();
   });
-  renderCheckboxGroup(els.destFilter, dests, destChecked, (value, checked) => {
-    if (checked) destChecked.add(value); else destChecked.delete(value);
+  renderCheckboxGroup(els.destFilter, dests, state.destFiltersChecked, (value, checked) => {
+    if (checked) state.destFiltersChecked.add(value); else state.destFiltersChecked.delete(value);
     renderBoard();
   });
 }
@@ -629,7 +592,56 @@ function renderRealtimeBoard() {
   // 3枠は常に確保し、以降の列車が無い枠は空欄コマとして表示する
   const slots = [0, 1, 2].map((i) => upcoming[i] || null);
 
-  updateFlapSign(slots, stationName);
+  if (state.signStyle === 'lcd') {
+    renderLcdSign(slots, stationName);
+  } else {
+    updateFlapSign(slots, stationName);
+  }
+}
+
+/**
+ * LCD式サイン: 種別ごとに色分けしたバッジで発車時刻・行先を表示する。
+ * (パタパタは実機再現のため種別は白黒統一だが、LCDはこちらで色分けする)
+ */
+const LCD_TYPE_STYLES = {
+  '普通': 'background:#1c6fe0;color:#fff;border-color:#1c6fe0;',
+  '区間急行': 'background:#a3e635;color:#1a2e05;border-color:#a3e635;',
+  '急行': 'background:#f97316;color:#fff;border-color:#f97316;',
+  '通勤急行': 'background:#fff;color:#f97316;border:2px solid #f97316;',
+  'ライナー': 'background:#7b1128;color:#fff;border-color:#7b1128;', // ワインレッド
+  '特急': 'background:#dc2626;color:#fff;border-color:#dc2626;',
+};
+function lcdTypeStyle(typeName) {
+  return LCD_TYPE_STYLES[typeName] || 'background:#374151;color:#fff;border-color:#374151;';
+}
+
+function renderLcdSign(slots, stationName) {
+  els.board.innerHTML = `
+    <div class="lcd-sign">
+      <div class="lcd-sign-header">
+        <span class="lcd-h">発車時刻</span><span class="lcd-h">種別</span><span class="lcd-h">行先</span>
+      </div>
+      <div class="lcd-sign-body">
+        ${slots.map((d) => lcdRowHtml(d, stationName)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function lcdRowHtml(d, stationName) {
+  if (!d) {
+    return `<div class="lcd-row is-empty" tabindex="-1"><span class="lcd-time"></span><span class="lcd-badge"></span><span class="lcd-dest"></span></div>`;
+  }
+  const { train, stop } = d;
+  const dep = stop.dep;
+  const displayType = displayTypeForStation(train, stationName);
+  return `
+    <div class="lcd-row" data-train-key="${train.key}" tabindex="0">
+      <span class="lcd-time">${dep ? dep.label : ''}</span>
+      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">${escapeHtml(displayType)}</span>
+      <span class="lcd-dest">${escapeHtml(train.destinationName)}</span>
+    </div>
+  `;
 }
 
 /** パタパタ(反転フラップ)式サイン: 列車接近の案内はせず、既定コマの範囲のみ表示する */
@@ -884,157 +896,3 @@ function escapeHtml(str) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]));
 }
-
-/* ============================================================
- * ダイヤグラム(スジ図)表示
- * 横軸=時間、縦軸=駅。上り・下りを分けず、同じ図の中に重ねて描く。
- * ============================================================ */
-const DIAGRAM_BASE_PX_PER_MIN = 3.2; // 横方向の基準スケール(拡大率1のとき)
-const DIAGRAM_DEFAULT_LINE_COLOR = '#1a1a1a'; // 色指定の無い種別(主に普通)は黒で描く(実物のダイヤグラム風)
-const DIAGRAM_BASE_STATION_GAP = 46; // 縦方向の基準スケール(拡大率1のとき、駅間の間隔px)
-const DIAGRAM_ZOOM_STEP = 1.25;
-const DIAGRAM_ZOOM_MIN = 0.3;
-const DIAGRAM_ZOOM_MAX = 6;
-const DIAGRAM_LEFT_PAD = 92; // 駅名ラベル分の左余白
-const DIAGRAM_TOP_PAD = 34; // 時刻ラベル分の上余白
-const DIAGRAM_RIGHT_PAD = 24;
-const DIAGRAM_BOTTOM_PAD = 24;
-
-function zoomDiagram(axis, dir) {
-  const factor = dir > 0 ? DIAGRAM_ZOOM_STEP : 1 / DIAGRAM_ZOOM_STEP;
-  if (axis === 'x') {
-    state.diagramScaleX = Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, state.diagramScaleX * factor));
-  } else {
-    state.diagramScaleY = Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, state.diagramScaleY * factor));
-  }
-  renderBoard();
-}
-
-function toggleDiagramFullscreen() {
-  const wrap = document.getElementById('diagram-wrap');
-  if (!wrap) return;
-  if (!document.fullscreenElement) {
-    (wrap.requestFullscreen || wrap.webkitRequestFullscreen)?.call(wrap);
-  } else {
-    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
-  }
-}
-
-function renderDiagram() {
-  populateFilterOptions();
-
-  const dia = state.timetable.dias[state.diaIndex];
-  const stations = state.timetable.stations;
-  if (!dia || stations.length === 0) {
-    els.board.innerHTML = '';
-    els.emptyState.classList.remove('is-hidden');
-    els.emptyState.textContent = 'ダイヤグラムを表示するデータがありません';
-    return;
-  }
-
-  const trains = collectDiaTrains().filter((train) => {
-    const displayType = typeKey(train);
-    return state.diagramTypeFiltersChecked.has(displayType) && state.diagramDestFiltersChecked.has(train.destinationName);
-  });
-
-  // 表示する時刻範囲を、実際にあるデータから決める(無ければ4:00〜26:00を既定に)
-  let minMin = Infinity;
-  let maxMin = -Infinity;
-  trains.forEach((train) => {
-    train.stops.forEach((stop) => {
-      if (!stop) return;
-      if (stop.arr) { minMin = Math.min(minMin, stop.arr.totalMinutes); maxMin = Math.max(maxMin, stop.arr.totalMinutes); }
-      if (stop.dep) { minMin = Math.min(minMin, stop.dep.totalMinutes); maxMin = Math.max(maxMin, stop.dep.totalMinutes); }
-    });
-  });
-  if (!Number.isFinite(minMin)) { minMin = 4 * 60; maxMin = 26 * 60; }
-  minMin = Math.floor(minMin / 30) * 30 - 15;
-  maxMin = Math.ceil(maxMin / 30) * 30 + 15;
-
-  const pxPerMin = DIAGRAM_BASE_PX_PER_MIN * state.diagramScaleX;
-  const stationGap = DIAGRAM_BASE_STATION_GAP * state.diagramScaleY;
-  const chartW = (maxMin - minMin) * pxPerMin;
-  const chartH = (stations.length - 1) * stationGap;
-  const svgW = DIAGRAM_LEFT_PAD + chartW + DIAGRAM_RIGHT_PAD;
-  const svgH = DIAGRAM_TOP_PAD + chartH + DIAGRAM_BOTTOM_PAD;
-
-  const xOf = (min) => DIAGRAM_LEFT_PAD + (min - minMin) * pxPerMin;
-  const yOf = (stationIndex) => DIAGRAM_TOP_PAD + stationIndex * stationGap;
-  // 上り列車の時間軸は左右反転して描く(下り=\、上り=/ になるように)。
-  // このサンプルデータは上り側も駅番号が増える向きに時刻が記録されているため、
-  // そのままでは上下とも同じ向きの筋になってしまう。見た目の約束事として反転している。
-  const xOfDirectional = (min, direction) => (direction === 'Nobori' ? xOf(minMin + maxMin - min) : xOf(min));
-
-  // 縦グリッド(駅の水平線 + 駅名)
-  let gridHtml = '';
-  stations.forEach((st, i) => {
-    const y = yOf(i);
-    gridHtml += `<line class="diagram-station-line" x1="${DIAGRAM_LEFT_PAD}" y1="${y}" x2="${DIAGRAM_LEFT_PAD + chartW}" y2="${y}" />`;
-    gridHtml += `<text class="diagram-station-label" x="${DIAGRAM_LEFT_PAD - 8}" y="${y}" text-anchor="end" dominant-baseline="middle">${escapeHtml(st.name)}</text>`;
-  });
-
-  // 横グリッド(拡大率に応じて1〜60分刻みの縦線、10分ごとにやや濃く、1時間ごとに時刻ラベル)
-  let timeGridHtml = '';
-  let tickStep = 1;
-  if (pxPerMin < 0.5) tickStep = 60;
-  else if (pxPerMin < 1.2) tickStep = 30;
-  else if (pxPerMin < 2.5) tickStep = 10;
-  else if (pxPerMin < 5) tickStep = 5;
-  const startTick = Math.ceil(minMin / tickStep) * tickStep;
-  for (let t = startTick; t <= maxMin; t += tickStep) {
-    const x = xOf(t);
-    const isHour = t % 60 === 0;
-    const isTen = t % 10 === 0;
-    const cls = isHour ? 'is-hour' : (isTen ? 'is-ten' : '');
-    timeGridHtml += `<line class="diagram-time-line ${cls}" x1="${x}" y1="${DIAGRAM_TOP_PAD}" x2="${x}" y2="${DIAGRAM_TOP_PAD + chartH}" />`;
-    if (isHour) {
-      const h = Math.floor(((t % 1440) + 1440) % 1440 / 60);
-      timeGridHtml += `<text class="diagram-time-label" x="${x}" y="${DIAGRAM_TOP_PAD - 10}" text-anchor="middle">${h}</text>`;
-    }
-  }
-
-  // 各列車の筋(上り・下りを分けず同じ図に重ねて描く)
-  let linesHtml = '';
-  let labelsHtml = '';
-  trains.forEach((train) => {
-    const pts = [];
-    train.stops.forEach((stop, i) => {
-      if (!stop) return;
-      if (stop.arr) pts.push([xOfDirectional(stop.arr.totalMinutes, train.direction), yOf(i)]);
-      if (stop.dep) pts.push([xOfDirectional(stop.dep.totalMinutes, train.direction), yOf(i)]);
-    });
-    if (pts.length < 2) return;
-    const type = typeKey(train);
-    const color = (type === '普通' ? null : TYPE_COLOR_OVERRIDES[type]) || DIAGRAM_DEFAULT_LINE_COLOR;
-    const dash = type === 'ライナー' ? ' stroke-dasharray="6 4"' : '';
-    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    linesHtml += `<path class="diagram-train-line" d="${d}" stroke="${color}"${dash} data-train-key="${train.key}"><title>${escapeHtml(type)} ${escapeHtml(train.destinationName)} ${escapeHtml(train.number || '')}</title></path>`;
-
-    // 列車番号(ライナー等は種別名も添えて)のラベルを、筋の傾きに沿わせて表示する
-    const label = (type === 'ライナー' || type === '特急') ? `${train.number || ''} ${type}`.trim() : (train.number || '');
-    if (label) {
-      const [x0, y0] = pts[0];
-      const [x1, y1] = pts[1];
-      const angle = Math.atan2(y1 - y0, x1 - x0) * (180 / Math.PI);
-      labelsHtml += `<text class="diagram-train-label" x="${x0.toFixed(1)}" y="${(y0 - 5).toFixed(1)}" fill="${color}" transform="rotate(${angle.toFixed(1)} ${x0.toFixed(1)} ${(y0 - 5).toFixed(1)})">${escapeHtml(label)}</text>`;
-    }
-  });
-
-  els.board.innerHTML = `
-    <div class="diagram-wrap" id="diagram-wrap">
-      <div class="diagram-scroll">
-        <svg class="diagram-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-          <g class="diagram-grid">${gridHtml}${timeGridHtml}</g>
-          <g class="diagram-lines">${linesHtml}</g>
-          <g class="diagram-labels">${labelsHtml}</g>
-        </svg>
-      </div>
-    </div>
-  `;
-
-  if (trains.length === 0) {
-    els.emptyState.classList.remove('is-hidden');
-    els.emptyState.textContent = '条件に合う列車がありません(絞り込みを確認してください)';
-  }
-}
-
