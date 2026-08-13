@@ -525,6 +525,83 @@ select:focus, input:focus, button:focus {
   .flap-tile.flap-settle { animation: none; }
 }
 
+/* ---------- LCD式サイン(種別を色分けして表示) ---------- */
+.lcd-sign {
+  background: #14181f;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 24px 48px -24px rgba(16, 25, 40, 0.5);
+  font-family: var(--font-jp);
+}
+.lcd-sign-header {
+  display: flex;
+  gap: 10px;
+  padding: 0 6px 10px;
+}
+.lcd-h {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8b93a0;
+}
+.lcd-h:nth-child(1) { flex: 0 0 140px; }
+.lcd-h:nth-child(2) { flex: 0 0 150px; }
+.lcd-h:nth-child(3) { flex: 1; }
+
+.lcd-sign-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lcd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1b2029;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.lcd-row:hover, .lcd-row:focus-visible { background: #232a36; }
+.lcd-row.is-empty { background: #14181f; cursor: default; }
+
+.lcd-time {
+  flex: 0 0 140px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 28px;
+  color: #f2e6c8;
+  font-variant-numeric: tabular-nums;
+}
+.lcd-badge {
+  flex: 0 0 150px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  font-size: 18px;
+  text-align: center;
+}
+.lcd-dest {
+  flex: 1;
+  font-weight: 900;
+  font-size: 26px;
+  color: #fff;
+}
+
+@media (max-width: 760px) {
+  .lcd-h:nth-child(1), .lcd-time { flex-basis: 90px; }
+  .lcd-h:nth-child(2), .lcd-badge { flex-basis: 100px; }
+  .lcd-time { font-size: 20px; }
+  .lcd-badge { font-size: 14px; padding: 6px 8px; }
+  .lcd-dest { font-size: 18px; }
+}
+
 /* 時刻表ブラウザ側でも同じフォントトーンの種別バッジ・時刻表記を使う */
 .dep-badge-inline {
   width: auto;
@@ -698,84 +775,6 @@ select:focus, input:focus, button:focus {
 .modal-table tr.row-outside .col-dash { text-align: center; }
 .modal-table tr.row-terminal td { font-weight: 700; }
 .modal-table .col-pass { color: var(--ink-faint); font-size: 12.5px; }
-
-/* ---------- ダイヤグラム(スジ図) ---------- */
-.fullscreen-btn {
-  background: var(--line-blue);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-family: var(--font-jp);
-  cursor: pointer;
-}
-.fullscreen-btn:hover { background: var(--line-blue-ink); }
-
-.diagram-wrap {
-  background: #ffffff;
-  border: 1px solid var(--divider);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.diagram-wrap:fullscreen {
-  background: #ffffff;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 16px;
-}
-.diagram-wrap:fullscreen .diagram-scroll { flex: 1; }
-.diagram-scroll {
-  overflow: auto;
-  max-height: 78vh;
-}
-.diagram-svg {
-  display: block;
-  background: #ffffff;
-}
-.diagram-station-line {
-  stroke: #b9bfc9;
-  stroke-width: 1;
-}
-.diagram-station-label {
-  fill: #1a1a1a;
-  font-family: var(--font-jp);
-  font-size: 12px;
-  font-weight: 500;
-}
-.diagram-time-line {
-  stroke: #e4e7ec;
-  stroke-width: 1;
-}
-.diagram-time-line.is-ten {
-  stroke: #d3d8e0;
-}
-.diagram-time-line.is-hour {
-  stroke: #9aa1ac;
-}
-.diagram-time-label {
-  fill: #4b5563;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.diagram-train-line {
-  fill: none;
-  stroke-width: 1.1;
-  opacity: 0.92;
-  cursor: pointer;
-  transition: stroke-width 0.1s, opacity 0.1s;
-}
-.diagram-train-line:hover {
-  stroke-width: 2.6;
-  opacity: 1;
-}
-.diagram-train-label {
-  font-family: var(--font-jp);
-  font-size: 9.5px;
-  pointer-events: none;
-  user-select: none;
-}
 
 /* ---------- レスポンシブ ---------- */
 @media (max-width: 640px) {
