@@ -748,6 +748,9 @@ select:focus, input:focus, button:focus {
   stroke: #e4e7ec;
   stroke-width: 1;
 }
+.diagram-time-line.is-ten {
+  stroke: #d3d8e0;
+}
 .diagram-time-line.is-hour {
   stroke: #9aa1ac;
 }

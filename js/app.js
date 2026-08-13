@@ -18,10 +18,15 @@ const state = {
   manualClock: null, // {hour, minute}
   // 種別・行先の絞り込み(チェックボックス式)。チェックが入っている値だけを表示する。
   // 初めて登場した値はデフォルトでチェック済みにする(typeFiltersKnown/destFiltersKnownで既知かどうかを管理)。
+  // 時刻表(駅ごと)とダイヤグラム(全体・両方向)は前提が異なるため、フィルター状態は別々に持つ。
   typeFiltersChecked: new Set(),
   typeFiltersKnown: new Set(),
   destFiltersChecked: new Set(),
   destFiltersKnown: new Set(),
+  diagramTypeFiltersChecked: new Set(),
+  diagramTypeFiltersKnown: new Set(),
+  diagramDestFiltersChecked: new Set(),
+  diagramDestFiltersKnown: new Set(),
   diagramScaleX: 1,
   diagramScaleY: 1,
 };
@@ -429,6 +434,10 @@ async function loadOudFile(path) {
     state.typeFiltersKnown = new Set();
     state.destFiltersChecked = new Set();
     state.destFiltersKnown = new Set();
+    state.diagramTypeFiltersChecked = new Set();
+    state.diagramTypeFiltersKnown = new Set();
+    state.diagramDestFiltersChecked = new Set();
+    state.diagramDestFiltersKnown = new Set();
 
     populateDiaSelect(timetable.dias);
     populateStationSelect(timetable.stations);
@@ -553,8 +562,14 @@ function collectDiaTrains() {
 
 /** 種別・行先フィルターのチェックボックスを、現在の表示モードに応じた実際の値で埋める */
 function populateFilterOptions() {
+  const isDiagram = state.viewMode === 'diagram';
+  const typeChecked = isDiagram ? state.diagramTypeFiltersChecked : state.typeFiltersChecked;
+  const typeKnown = isDiagram ? state.diagramTypeFiltersKnown : state.typeFiltersKnown;
+  const destChecked = isDiagram ? state.diagramDestFiltersChecked : state.destFiltersChecked;
+  const destKnown = isDiagram ? state.diagramDestFiltersKnown : state.destFiltersKnown;
+
   let types, dests;
-  if (state.viewMode === 'diagram') {
+  if (isDiagram) {
     const trains = collectDiaTrains();
     types = [...new Set(trains.map((t) => typeKey(t)).filter(Boolean))].sort();
     dests = [...new Set(trains.map((t) => t.destinationName).filter(Boolean))].sort();
@@ -564,15 +579,15 @@ function populateFilterOptions() {
     dests = [...new Set(base.map((d) => d.train.destinationName).filter(Boolean))].sort();
   }
 
-  ensureFilterDefaults(state.typeFiltersKnown, state.typeFiltersChecked, types);
-  ensureFilterDefaults(state.destFiltersKnown, state.destFiltersChecked, dests);
+  ensureFilterDefaults(typeKnown, typeChecked, types);
+  ensureFilterDefaults(destKnown, destChecked, dests);
 
-  renderCheckboxGroup(els.typeFilter, types, state.typeFiltersChecked, (value, checked) => {
-    if (checked) state.typeFiltersChecked.add(value); else state.typeFiltersChecked.delete(value);
+  renderCheckboxGroup(els.typeFilter, types, typeChecked, (value, checked) => {
+    if (checked) typeChecked.add(value); else typeChecked.delete(value);
     renderBoard();
   });
-  renderCheckboxGroup(els.destFilter, dests, state.destFiltersChecked, (value, checked) => {
-    if (checked) state.destFiltersChecked.add(value); else state.destFiltersChecked.delete(value);
+  renderCheckboxGroup(els.destFilter, dests, destChecked, (value, checked) => {
+    if (checked) destChecked.add(value); else destChecked.delete(value);
     renderBoard();
   });
 }
@@ -919,7 +934,7 @@ function renderDiagram() {
 
   const trains = collectDiaTrains().filter((train) => {
     const displayType = typeKey(train);
-    return state.typeFiltersChecked.has(displayType) && state.destFiltersChecked.has(train.destinationName);
+    return state.diagramTypeFiltersChecked.has(displayType) && state.diagramDestFiltersChecked.has(train.destinationName);
   });
 
   // 表示する時刻範囲を、実際にあるデータから決める(無ければ4:00〜26:00を既定に)
@@ -945,6 +960,10 @@ function renderDiagram() {
 
   const xOf = (min) => DIAGRAM_LEFT_PAD + (min - minMin) * pxPerMin;
   const yOf = (stationIndex) => DIAGRAM_TOP_PAD + stationIndex * stationGap;
+  // 上り列車の時間軸は左右反転して描く(下り=\、上り=/ になるように)。
+  // このサンプルデータは上り側も駅番号が増える向きに時刻が記録されているため、
+  // そのままでは上下とも同じ向きの筋になってしまう。見た目の約束事として反転している。
+  const xOfDirectional = (min, direction) => (direction === 'Nobori' ? xOf(minMin + maxMin - min) : xOf(min));
 
   // 縦グリッド(駅の水平線 + 駅名)
   let gridHtml = '';
@@ -954,15 +973,22 @@ function renderDiagram() {
     gridHtml += `<text class="diagram-station-label" x="${DIAGRAM_LEFT_PAD - 8}" y="${y}" text-anchor="end" dominant-baseline="middle">${escapeHtml(st.name)}</text>`;
   });
 
-  // 横グリッド(30分ごとの縦線、1時間ごとに時刻ラベル)
+  // 横グリッド(拡大率に応じて1〜60分刻みの縦線、10分ごとにやや濃く、1時間ごとに時刻ラベル)
   let timeGridHtml = '';
-  const startTick = Math.ceil(minMin / 30) * 30;
-  for (let t = startTick; t <= maxMin; t += 30) {
+  let tickStep = 1;
+  if (pxPerMin < 0.5) tickStep = 60;
+  else if (pxPerMin < 1.2) tickStep = 30;
+  else if (pxPerMin < 2.5) tickStep = 10;
+  else if (pxPerMin < 5) tickStep = 5;
+  const startTick = Math.ceil(minMin / tickStep) * tickStep;
+  for (let t = startTick; t <= maxMin; t += tickStep) {
     const x = xOf(t);
     const isHour = t % 60 === 0;
-    timeGridHtml += `<line class="diagram-time-line ${isHour ? 'is-hour' : ''}" x1="${x}" y1="${DIAGRAM_TOP_PAD}" x2="${x}" y2="${DIAGRAM_TOP_PAD + chartH}" />`;
+    const isTen = t % 10 === 0;
+    const cls = isHour ? 'is-hour' : (isTen ? 'is-ten' : '');
+    timeGridHtml += `<line class="diagram-time-line ${cls}" x1="${x}" y1="${DIAGRAM_TOP_PAD}" x2="${x}" y2="${DIAGRAM_TOP_PAD + chartH}" />`;
     if (isHour) {
-      const h = Math.floor(t / 60);
+      const h = Math.floor(((t % 1440) + 1440) % 1440 / 60);
       timeGridHtml += `<text class="diagram-time-label" x="${x}" y="${DIAGRAM_TOP_PAD - 10}" text-anchor="middle">${h}</text>`;
     }
   }
@@ -974,8 +1000,8 @@ function renderDiagram() {
     const pts = [];
     train.stops.forEach((stop, i) => {
       if (!stop) return;
-      if (stop.arr) pts.push([xOf(stop.arr.totalMinutes), yOf(i)]);
-      if (stop.dep) pts.push([xOf(stop.dep.totalMinutes), yOf(i)]);
+      if (stop.arr) pts.push([xOfDirectional(stop.arr.totalMinutes, train.direction), yOf(i)]);
+      if (stop.dep) pts.push([xOfDirectional(stop.dep.totalMinutes, train.direction), yOf(i)]);
     });
     if (pts.length < 2) return;
     const type = typeKey(train);
