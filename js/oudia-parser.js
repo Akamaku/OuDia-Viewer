@@ -146,6 +146,31 @@ function parseEkiJikoku(raw, stationCount) {
   return stops;
 }
 
+/**
+ * 上り列車の停車範囲(実際に停車/通過データがある駅の範囲)の中だけで、
+ * 各駅に割り当てる時刻を上下反転する(駅そのものの並び=走行区間は変えない)。
+ * このファイルは上りのEkiJikokuが下りと同じ「駅番号が増える向き」に記録されているため、
+ * そのままだと「茶志内行きのはずが茶志内で時刻が一番早い」といった矛盾が起きる。
+ * 途中区間だけを走る列車もあるため、配列全体ではなく実際に停車範囲だけを反転する。
+ */
+function reverseStopsWithinRange(stops) {
+  let firstIdx = null;
+  let lastIdx = null;
+  stops.forEach((s, i) => {
+    if (s) {
+      if (firstIdx === null) firstIdx = i;
+      lastIdx = i;
+    }
+  });
+  if (firstIdx === null) return stops; // 停車データが無ければ何もしない
+
+  const result = stops.slice();
+  for (let i = firstIdx; i <= lastIdx; i++) {
+    result[i] = stops[lastIdx - (i - firstIdx)];
+  }
+  return result;
+}
+
 /** Kudari(下り) / Nobori(上り) 方向の列車一覧を抽出 */
 function extractDirection(diaNode, dirKey, stations, types) {
   const dirNode = ouChildren(diaNode, dirKey)[0];
@@ -154,7 +179,8 @@ function extractDirection(diaNode, dirKey, stations, types) {
   return ouChildren(dirNode, 'Ressya').map((rNode, idx) => {
     const typeIndex = parseInt(ouProp(rNode, 'Syubetsu') || '0', 10);
     const number = ouProp(rNode, 'Ressyabangou') || '';
-    const stops = parseEkiJikoku(ouProp(rNode, 'EkiJikoku') || '', stations.length);
+    const rawStops = parseEkiJikoku(ouProp(rNode, 'EkiJikoku') || '', stations.length);
+    const stops = dirKey === 'Nobori' ? reverseStopsWithinRange(rawStops) : rawStops;
 
     // 行先(終着駅)を決定: 上り(Nobori)は駅番号が小さい方向(青波中央方面)、
     // 下り(Kudari)は駅番号が大きい方向(茶志内方面)に進む、という向きで判定する。
