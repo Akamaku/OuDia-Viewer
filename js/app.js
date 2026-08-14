@@ -293,7 +293,14 @@ function openTrainModal(train) {
     }
   });
 
-  const rows = stations.map((st, i) => {
+  // 上り列車は、下りと同じ並び(駅番号が小さい順)ではなく、
+  // 実際に進む向き(終着駅が上)に合わせて駅の並びを逆にする。
+  const order = train.direction === 'Nobori'
+    ? stations.map((_, i) => i).reverse()
+    : stations.map((_, i) => i);
+
+  const rows = order.map((i) => {
+    const st = stations[i];
     if (firstIdx === null || i < firstIdx || i > lastIdx) {
       return `<tr class="row-outside"><td class="col-eki">${escapeHtml(st.name)}</td><td class="col-dash">−</td></tr>`;
     }
@@ -691,12 +698,14 @@ function lcdRowHtml(d, stationName) {
   const dep = stop.dep;
   const displayType = displayTypeForStation(train, stationName);
   const destName = train.destinationName;
+  // 複合種別(「船渡川から普通 特急」等)はパタパタと同じ、上下2段の分割表示にする
+  const badgeContent = isCompoundType(displayType)
+    ? `<span class="lcd-badge-compound">${renderTypeFace(displayType)}</span>`
+    : `<span class="lcd-badge-main">${escapeHtml(displayType)}</span>${romajiSpan(TYPE_ENGLISH[displayType])}`;
   return `
     <div class="lcd-row" data-train-key="${train.key}" tabindex="0">
       <span class="lcd-time">${dep ? dep.label : ''}</span>
-      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">
-        <span class="lcd-badge-main">${escapeHtml(displayType)}</span>${romajiSpan(TYPE_ENGLISH[displayType])}
-      </span>
+      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">${badgeContent}</span>
       <span class="lcd-dest">
         <span class="lcd-dest-main">${escapeHtml(destName)}</span>${romajiSpan(STATION_ROMAJI[destName])}
       </span>
