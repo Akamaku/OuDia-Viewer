@@ -140,6 +140,7 @@ async function init() {
   bindEvents();
   tickClock();
   setInterval(tickClock, 1000);
+  loadRomajiOverrides(); // 任意の駅名ローマ字追加ファイル(無くても動作する)
 
   try {
     const manifest = await loadManifest();
@@ -615,6 +616,60 @@ function lcdTypeStyle(typeName) {
   return LCD_TYPE_STYLES[typeName] || 'background:#374151;color:#fff;border-color:#374151;';
 }
 
+/**
+ * 種別名の英語表記(ローマ字ではなく英訳)。指定の無い種別(臨時・団体など)は表示しない。
+ */
+const TYPE_ENGLISH = {
+  '普通': 'Local',
+  '急行': 'Express',
+  '特急': 'Limited Express',
+  '通勤急行': 'Commuter Express',
+  '区間急行': 'Suburban Express',
+  'ライナー': 'Liner',
+  '回送': 'Out of service',
+  '試運転': 'Out of service',
+  '船渡川から普通 特急': 'Lim.Express +Minamigaoka.',
+  // 臨時・団体は英語表記なし(意図的に未登録)
+};
+
+/**
+ * 駅名のヘボン式ローマ字(既知の駅だけ内蔵。それ以外は oud/romaji.json があればそこから補う)。
+ * 漢字だけからは正しい読みを機械的に決められないため、自動変換はしていない。
+ */
+const STATION_ROMAJI = {
+  '青波中央': 'Aonami-chuo',
+  '青波西': 'Aonami-nishi',
+  '港が丘': 'Minato-ga-oka',
+  '潮見台': 'Shiomidai',
+  '波越': 'Namikoshi',
+  '朝日ヶ丘': 'Asahi-ga-oka',
+  '桜木町': 'Sakuragicho',
+  '新森町': 'Shinmorimachi',
+  '高輪平': 'Takanawadaira',
+  '峯川': 'Minegawa',
+  '花咲野': 'Hanasakino',
+  '緑ヶ丘': 'Midori-ga-oka',
+  '船渡川': 'Funatogawa',
+  '南ヶ丘': 'Minami-ga-oka',
+  '茶志内': 'Chashinai',
+  '青波駅前': 'Aonami-ekimae',
+  '波止場通': 'Hatobadori',
+  '柳町': 'Yanagimachi',
+  '茶志内駅': 'Chashinai-eki',
+};
+
+/** oud/romaji.json (任意)を読み込み、STATION_ROMAJI に追加する。無ければ何もしない。 */
+async function loadRomajiOverrides() {
+  try {
+    const res = await fetch('oud/romaji.json', { cache: 'no-store' });
+    if (res.ok) Object.assign(STATION_ROMAJI, await res.json());
+  } catch (e) { /* ファイルが無ければ静かに無視 */ }
+}
+
+function romajiSpan(text) {
+  return text ? `<span class="lcd-romaji">${escapeHtml(text)}</span>` : '';
+}
+
 function renderLcdSign(slots, stationName) {
   els.board.innerHTML = `
     <div class="lcd-sign">
@@ -635,11 +690,16 @@ function lcdRowHtml(d, stationName) {
   const { train, stop } = d;
   const dep = stop.dep;
   const displayType = displayTypeForStation(train, stationName);
+  const destName = train.destinationName;
   return `
     <div class="lcd-row" data-train-key="${train.key}" tabindex="0">
       <span class="lcd-time">${dep ? dep.label : ''}</span>
-      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">${escapeHtml(displayType)}</span>
-      <span class="lcd-dest">${escapeHtml(train.destinationName)}</span>
+      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">
+        <span class="lcd-badge-main">${escapeHtml(displayType)}</span>${romajiSpan(TYPE_ENGLISH[displayType])}
+      </span>
+      <span class="lcd-dest">
+        <span class="lcd-dest-main">${escapeHtml(destName)}</span>${romajiSpan(STATION_ROMAJI[destName])}
+      </span>
     </div>
   `;
 }

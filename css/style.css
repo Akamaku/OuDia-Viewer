@@ -545,8 +545,8 @@ select:focus, input:focus, button:focus {
   text-transform: uppercase;
   color: #8b93a0;
 }
-.lcd-h:nth-child(1) { flex: 0 0 140px; }
-.lcd-h:nth-child(2) { flex: 0 0 150px; }
+.lcd-h:nth-child(1) { flex: 0 0 150px; }
+.lcd-h:nth-child(2) { flex: 0 0 190px; }
 .lcd-h:nth-child(3) { flex: 1; }
 
 .lcd-sign-body {
@@ -568,38 +568,55 @@ select:focus, input:focus, button:focus {
 .lcd-row.is-empty { background: #14181f; cursor: default; }
 
 .lcd-time {
-  flex: 0 0 140px;
-  font-family: var(--font-mono);
+  flex: 0 0 150px;
+  font-family: var(--font-jp);
   font-weight: 700;
-  font-size: 28px;
+  font-size: 32px;
   color: #f2e6c8;
   font-variant-numeric: tabular-nums;
 }
 .lcd-badge {
-  flex: 0 0 150px;
+  flex: 0 0 190px;
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: center;
-  padding: 8px 10px;
-  border-radius: 6px;
+  flex-wrap: wrap;
+  gap: 2px 7px;
+  padding: 9px 10px;
+  border-radius: 0; /* 種別枠は角ばらせる */
   border: 1px solid transparent;
-  font-weight: 700;
-  font-size: 18px;
   text-align: center;
+}
+.lcd-badge-main {
+  font-weight: 700;
+  font-size: 21px;
 }
 .lcd-dest {
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.lcd-dest-main {
   font-weight: 900;
-  font-size: 26px;
+  font-size: 30px;
   color: #fff;
+}
+.lcd-romaji {
+  font-family: var(--font-display);
+  font-size: 0.52em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  opacity: 0.8;
+  white-space: nowrap;
 }
 
 @media (max-width: 760px) {
-  .lcd-h:nth-child(1), .lcd-time { flex-basis: 90px; }
-  .lcd-h:nth-child(2), .lcd-badge { flex-basis: 100px; }
-  .lcd-time { font-size: 20px; }
-  .lcd-badge { font-size: 14px; padding: 6px 8px; }
-  .lcd-dest { font-size: 18px; }
+  .lcd-h:nth-child(1), .lcd-time { flex-basis: 96px; }
+  .lcd-h:nth-child(2), .lcd-badge { flex-basis: 130px; }
+  .lcd-time { font-size: 22px; }
+  .lcd-badge-main { font-size: 15px; }
+  .lcd-dest-main { font-size: 20px; }
 }
 
 /* 時刻表ブラウザ側でも同じフォントトーンの種別バッジ・時刻表記を使う */
