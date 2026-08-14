@@ -156,20 +156,18 @@ function extractDirection(diaNode, dirKey, stations, types) {
     const number = ouProp(rNode, 'Ressyabangou') || '';
     const stops = parseEkiJikoku(ouProp(rNode, 'EkiJikoku') || '', stations.length);
 
-    // 行先(終着駅)を決定: 方向ラベル(Kudari/Nobori)から機械的に決めるのではなく、
-    // 実際の時刻が一番遅い駅(=最後に到達する駅)を終着とする。
-    // ファイルによっては上り側も駅番号が増える向きに時刻が記録されていることがあり、
-    // 「Kudariは最大index・Noboriは最小index」という決め打ちだと向きを誤ることがあるため。
+    // 行先(終着駅)を決定: 上り(Nobori)は駅番号が小さい方向(青波中央方面)、
+    // 下り(Kudari)は駅番号が大きい方向(茶志内方面)に進む、という向きで判定する。
+    // (このファイルは上り側もEkiJikoku上の時刻が駅番号の増える向きに記録されているため、
+    //  時刻だけで判定すると上りが下りと同じ向きになってしまう。方向ラベルを優先する。)
     let destIndex = null;
-    let latestMinutes = -Infinity;
-    for (let i = 0; i < stops.length; i++) {
-      const stop = stops[i];
-      if (!stop) continue;
-      const t = stop.dep || stop.arr;
-      if (!t) continue;
-      if (t.totalMinutes > latestMinutes) {
-        latestMinutes = t.totalMinutes;
-        destIndex = i;
+    if (dirKey === 'Kudari') {
+      for (let i = 0; i < stops.length; i++) {
+        if (stops[i]) destIndex = i; // 最後まで更新し続けると最大indexが残る
+      }
+    } else {
+      for (let i = 0; i < stops.length; i++) {
+        if (stops[i]) { destIndex = i; break; } // 最初に見つかった(最小index)駅が終着
       }
     }
 
