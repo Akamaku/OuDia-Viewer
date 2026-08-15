@@ -10,7 +10,6 @@ const state = {
   manifest: [],
   currentFile: null,
   timetable: null, // parseOuDiaによる結果
-  announceQueues: new Map(), // train.key -> 放送で流す音声ファイル名の配列
   diaIndex: 0,
   stationIndex: 0,
   directionFilter: 'all', // 'all' | 'Kudari' | 'Nobori'
@@ -261,15 +260,8 @@ function bindEvents() {
     }
   });
 
-  // 発車案内の行クリックで、その列車単体の時刻表を開く(放送ボタンのクリックは別処理)
+  // 発車案内の行クリックで、その列車単体の時刻表を開く
   els.board.addEventListener('click', (e) => {
-    const announceBtn = e.target.closest('.row-announce-btn');
-    if (announceBtn) {
-      e.stopPropagation();
-      const queue = state.announceQueues.get(announceBtn.dataset.trainKey);
-      if (queue) playAnnouncementQueue(queue);
-      return;
-    }
     const row = e.target.closest('[data-train-key]');
     if (!row) return;
     const train = findTrainByKey(row.dataset.trainKey);
@@ -486,21 +478,7 @@ function showStatus(msg, level) {
   els.statusBar.classList.toggle('is-hidden', !visible);
 }
 
-/** 現在の基準時刻を「サービス日 0:00起点の分数」で返す(4時始発想定・深夜帯対応)。手動時刻は経過分ぶん進み続ける */
-function getNowServiceMinutes() {
-  const SERVICE_DAY_START = 4; // 4:00未満はサービス日的には「前日深夜」として扱う
-  if (state.useNow || !state.manualClock) {
-    const now = new Date();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const adjHour = hour < SERVICE_DAY_START ? hour + 24 : hour;
-    return adjHour * 60 + minute;
-  }
-  const elapsedMin = (Date.now() - state.manualClock.setAtMs) / 60000;
-  return state.manualClock.baseMinutes + elapsedMin;
-}
-
-/** 現在の基準時刻を「サービス日 0:00起点の秒数」で返す(放送の秒単位トリガー用) */
+/** 現在の基準時刻を「サービス日 0:00起点の秒数」で返す(4時始発想定・深夜帯対応、パタパタ/LCDの切り替えと放送の秒単位トリガーの両方で使う)。手動時刻は経過秒ぶん進み続ける */
 function getNowServiceSeconds() {
   const SERVICE_DAY_START = 4;
   if (state.useNow || !state.manualClock) {
@@ -564,6 +542,7 @@ function collectStationDepartures(opts) {
       train,
       stop,
       departMinutes: timeInfo.totalMinutes,
+      departSeconds: timeInfo.totalSeconds,
       departLabel: timeInfo.label,
       displayType,
       displayDest,
@@ -621,7 +600,7 @@ function renderCheckboxGroup(container, values, checkedSet, onChange) {
 
 function renderRealtimeBoard() {
   const stationName = state.timetable.stations[state.stationIndex]?.name || '';
-  const nowMin = getNowServiceMinutes();
+  const nowSec = getNowServiceSeconds();
   const all = collectStationDepartures();
 
   if (all.length === 0) {
@@ -631,10 +610,10 @@ function renderRealtimeBoard() {
     return;
   }
 
-  // 直近3本のみを表示する(発車時刻に基づく本当の並びのみで、無関係なローテーションはしない)
+  // 直近3本のみを表示する(発車時刻(秒単位)を過ぎた瞬間に切り替わる)
   const upcoming = all
-    .map((d) => ({ ...d, diff: d.departMinutes - nowMin }))
-    .filter((d) => d.diff >= -1)
+    .map((d) => ({ ...d, diff: d.departSeconds - nowSec }))
+    .filter((d) => d.diff >= 0)
     .sort((a, b) => a.diff - b.diff)
     .slice(0, FLAP_ROW_COUNT);
 
@@ -750,7 +729,6 @@ function lcdRowHtml(d, stationName) {
       <span class="lcd-dest">
         <span class="lcd-dest-main">${escapeHtml(destName)}</span>${romajiSpan(STATION_ROMAJI[destName])}
       </span>
-      ${announceButtonHtml(d)}
     </div>
   `;
 }
@@ -843,7 +821,6 @@ function flapRowHtml(d, stationName) {
       </div>
       ${flapTile('flap-type', 'type', t.type, typeColorStyle)}
       ${flapTile('flap-dest', 'dest', t.dest)}
-      ${announceButtonHtml(d)}
     </div>
   `;
 }
@@ -868,24 +845,6 @@ function updateFlapSign(slots, stationName) {
     if (typeTile) typeTile.style.cssText = d ? getFlapTypeStyle(displayTypeForStation(d.train, stationName)) : '';
     flipReelTo(typeTile, t.type);
     flipReelTo(rowEl.querySelector('.flap-dest'), t.dest);
-
-    // 放送ボタンは行の使い回しに合わせて追加/更新/削除する(タイルのように使い回さない)
-    let btn = rowEl.querySelector('.row-announce-btn');
-    if (d) {
-      state.announceQueues.set(d.train.key, buildAnnouncementQueue(d));
-      if (!btn) {
-        btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'row-announce-btn';
-        btn.setAttribute('aria-label', '放送を再生');
-        btn.title = '放送を再生';
-        btn.textContent = '🔊';
-        rowEl.appendChild(btn);
-      }
-      btn.dataset.trainKey = d.train.key;
-    } else if (btn) {
-      btn.remove();
-    }
   });
 }
 
@@ -1134,55 +1093,71 @@ function buildDepartureAnnouncement(d) {
   return queue;
 }
 
-/** 🔊ボタン用: 到着放送があればそれを、無ければ発車放送を再生する */
-function buildAnnouncementQueue(d) {
-  if (!d) return [];
-  const arrival = buildArrivalAnnouncement(d);
-  return arrival.length ? arrival : buildDepartureAnnouncement(d);
-}
-
-/** 放送プレイヤー: 複数の放送が重なった場合は割り込まず、キューに積んで順番に流す */
+/**
+ * 放送プレイヤー: 2つのAudio要素を交互に使い、片方を再生している間にもう片方へ
+ * 次のファイルを先読みしておくことで、ファイルの継ぎ目の無音区間をできるだけ短くする。
+ * 複数の放送が重なった場合は割り込まず、キューに積んで順番に流す。
+ */
 const announcePlayer = {
-  audio: (typeof Audio !== 'undefined') ? new Audio() : null,
+  audios: (typeof Audio !== 'undefined') ? [new Audio(), new Audio()] : null,
+  active: 0,
   queue: [],
   playing: false,
 };
-if (announcePlayer.audio) {
-  const playNext = () => {
+if (announcePlayer.audios) {
+  announcePlayer.audios.forEach((a) => { a.preload = 'auto'; });
+
+  const preloadInto = (idx, file) => {
+    const a = announcePlayer.audios[idx];
+    if (a.dataset.pendingFile === file) return; // 既に先読み済み
+    a.src = ANNOUNCE_AUDIO_BASE + file;
+    a.dataset.pendingFile = file;
+    a.load();
+  };
+
+  const playCurrent = () => {
     if (announcePlayer.queue.length === 0) { announcePlayer.playing = false; return; }
     announcePlayer.playing = true;
     const file = announcePlayer.queue.shift();
-    announcePlayer.audio.src = ANNOUNCE_AUDIO_BASE + file;
-    announcePlayer.audio.play().catch(playNext);
+    const idx = announcePlayer.active;
+    const audio = announcePlayer.audios[idx];
+    if (audio.dataset.pendingFile !== file) {
+      audio.src = ANNOUNCE_AUDIO_BASE + file;
+      audio.dataset.pendingFile = file;
+    }
+    audio.currentTime = 0;
+    audio.play().catch(advance);
+    // 再生中に、次のファイルをもう片方の要素へ先読みしておく
+    const nextFile = announcePlayer.queue[0];
+    if (nextFile) preloadInto(1 - idx, nextFile);
   };
-  announcePlayer.audio.addEventListener('ended', playNext);
-  announcePlayer.audio.addEventListener('error', playNext);
-  announcePlayer._playNext = playNext;
+  function advance() {
+    announcePlayer.active = 1 - announcePlayer.active;
+    playCurrent();
+  }
+  announcePlayer.audios.forEach((a) => {
+    a.addEventListener('ended', advance);
+    a.addEventListener('error', advance);
+  });
+  announcePlayer._playCurrent = playCurrent;
 }
 /** 音声ファイル名の配列を放送キューに追加する(再生中なら続けて、空いていればすぐに再生)。ファイルが無ければ静かにスキップして次へ進む。 */
 function playAnnouncementQueue(filenames) {
-  if (!filenames || !filenames.length || !announcePlayer.audio) return;
+  if (!filenames || !filenames.length || !announcePlayer.audios) return;
   announcePlayer.queue.push(...filenames);
-  if (!announcePlayer.playing) announcePlayer._playNext();
+  if (!announcePlayer.playing) announcePlayer._playCurrent();
 }
 
 // 一部のブラウザは、ページ内で一度もクリック等の操作が無いと音声の自動再生を拒否する。
 // 最初のユーザー操作で無音の再生を試み、以降の自動放送が鳴りやすいようにしておく。
 let audioUnlocked = false;
 function unlockAudioOnce() {
-  if (audioUnlocked || !announcePlayer.audio) return;
+  if (audioUnlocked || !announcePlayer.audios) return;
   audioUnlocked = true;
-  const a = announcePlayer.audio;
-  const prevSrc = a.src;
-  a.muted = true;
-  a.play().then(() => { a.pause(); a.muted = false; a.src = prevSrc; }).catch(() => { a.muted = false; });
-}
-
-/** 放送ボタン(🔊)のHTML断片。再生する台本をあらかじめ state.announceQueues に登録しておく。 */
-function announceButtonHtml(d) {
-  if (!d) return '';
-  state.announceQueues.set(d.train.key, buildAnnouncementQueue(d));
-  return `<button type="button" class="row-announce-btn" data-train-key="${d.train.key}" aria-label="放送を再生" title="放送を再生">🔊</button>`;
+  announcePlayer.audios.forEach((a) => {
+    a.muted = true;
+    a.play().then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
+  });
 }
 
 /**
