@@ -147,28 +147,14 @@ function parseEkiJikoku(raw, stationCount) {
 }
 
 /**
- * 上り列車の停車範囲(実際に停車/通過データがある駅の範囲)の中だけで、
- * 各駅に割り当てる時刻を上下反転する(駅そのものの並び=走行区間は変えない)。
+ * 上り列車は、駅の並び全体(青波中央⇔茶志内を軸)でミラーして時刻を割り当て直す。
  * このファイルは上りのEkiJikokuが下りと同じ「駅番号が増える向き」に記録されているため、
  * そのままだと「茶志内行きのはずが茶志内で時刻が一番早い」といった矛盾が起きる。
- * 途中区間だけを走る列車もあるため、配列全体ではなく実際に停車範囲だけを反転する。
+ * 途中区間だけを走る列車も、記録されている区間をそのまま線対称の反対側の区間として扱う
+ * (例: 「峯川〜茶志内」の記録は「朝日ヶ丘〜青波中央」の列車として扱う)。
  */
 function reverseStopsWithinRange(stops) {
-  let firstIdx = null;
-  let lastIdx = null;
-  stops.forEach((s, i) => {
-    if (s) {
-      if (firstIdx === null) firstIdx = i;
-      lastIdx = i;
-    }
-  });
-  if (firstIdx === null) return stops; // 停車データが無ければ何もしない
-
-  const result = stops.slice();
-  for (let i = firstIdx; i <= lastIdx; i++) {
-    result[i] = stops[lastIdx - (i - firstIdx)];
-  }
-  return result;
+  return stops.slice().reverse();
 }
 
 /** Kudari(下り) / Nobori(上り) 方向の列車一覧を抽出 */

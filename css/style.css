@@ -294,6 +294,32 @@ select:focus, input:focus, button:focus {
   gap: 8px;
   cursor: pointer;
 }
+.row-announce-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f2e6c8;
+  border-radius: 6px;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.row-announce-btn:hover, .row-announce-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+}
+.flap-row.is-empty .row-announce-btn { visibility: hidden; }
+.lcd-row .row-announce-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eaf2ff;
+}
+.lcd-row.is-empty .row-announce-btn { visibility: hidden; }
 .flap-time {
   flex: 0 0 250px;
   display: flex;
