@@ -999,7 +999,8 @@ function escapeHtml(str) {
  * ============================================================ */
 const ANNOUNCE_AUDIO_BASE = 'audio/';
 const ANNOUNCE_ARRIVAL_LEAD_SEC = 25; // 到着何秒前から流すか
-const ANNOUNCE_DEPARTURE_LEAD_SEC = 20; // 発車何秒前から流すか
+const ANNOUNCE_DEPARTURE_LEAD_SEC = 18; // 発車何秒前から流すか
+const ANNOUNCE_ORIGIN_ARRIVAL_LEAD_SEC = 60; // 到着時刻が無い駅(始発駅)は、発車の何秒前から到着放送を始めるか
 
 function announceHourFile(hour) {
   let h = hour;
@@ -1060,10 +1061,10 @@ function hasGenuineArrival(stop) {
   return stop.arr.totalSeconds !== stop.dep.totalSeconds; // 停車時間のある本当の到着
 }
 
-/** 到着放送の台本(発車時刻・分は読み上げず、「まもなく〜がまいります」形式) */
+/** 到着放送の台本(発車時刻・分は読み上げず、「まもなく〜がまいります」形式)。
+ *  到着時刻が無い(始発駅の)場合も、発車の1分前に同じ内容の放送を流す。 */
 function buildArrivalAnnouncement(d) {
-  const { stop, displayType, displayDest, isTerminalHere } = d;
-  if (!hasGenuineArrival(stop)) return []; // 始発駅など、本当の到着ではない
+  const { displayType, displayDest, isTerminalHere } = d;
   if (ANNOUNCE_NONBOARDING_TYPE_FILES[displayType]) {
     // 回送・試運転はそもそも到着放送の対象にしない(発車放送側でご案内)
     return [];
@@ -1121,12 +1122,17 @@ if (announcePlayer.audios) {
     const file = announcePlayer.queue.shift();
     const idx = announcePlayer.active;
     const audio = announcePlayer.audios[idx];
-    if (audio.dataset.pendingFile !== file) {
-      audio.src = ANNOUNCE_AUDIO_BASE + file;
-      audio.dataset.pendingFile = file;
+    try {
+      if (audio.dataset.pendingFile !== file) {
+        audio.src = ANNOUNCE_AUDIO_BASE + file;
+        audio.dataset.pendingFile = file;
+      }
+      // 注意: src変更直後にcurrentTimeを触るとメタデータ未読込でエラーになるブラウザがあるため触らない
+      audio.play().catch(advance);
+    } catch (e) {
+      advance();
+      return;
     }
-    audio.currentTime = 0;
-    audio.play().catch(advance);
     // 再生中に、次のファイルをもう片方の要素へ先読みしておく
     const nextFile = announcePlayer.queue[0];
     if (nextFile) preloadInto(1 - idx, nextFile);
@@ -1161,7 +1167,8 @@ function unlockAudioOnce() {
 }
 
 /**
- * 毎秒呼び出し、選択中の駅で「到着25秒前」「発車20秒前」に当たる列車があれば自動で放送する。
+ * 毎秒呼び出し、選択中の駅で「到着25秒前(到着時刻が無い始発駅は発車の1分前)」
+ * 「発車18秒前」に当たる列車があれば自動で放送する。
  * 同じ列車・同じ種類(到着/発車)の放送を何度も鳴らさないよう、announcedKeys に記録しておく。
  */
 const announcedKeys = new Set();
@@ -1171,10 +1178,19 @@ function checkAutoAnnouncements() {
   const all = collectStationDepartures();
   all.forEach((d) => {
     const { stop, train } = d;
+    // 到着放送: 本当の到着があればその25秒前、無ければ(始発駅)発車の1分前ちょうど
+    let arrivalTriggerSec = null;
+    let arrivalLead = ANNOUNCE_ARRIVAL_LEAD_SEC;
     if (hasGenuineArrival(stop)) {
+      arrivalTriggerSec = stop.arr.totalSeconds;
+    } else if (stop.dep) {
+      arrivalTriggerSec = stop.dep.totalSeconds - ANNOUNCE_ORIGIN_ARRIVAL_LEAD_SEC;
+      arrivalLead = 0; // この時刻自体が開始タイミングなので、追加のリードは無し
+    }
+    if (arrivalTriggerSec !== null) {
       const key = `${train.key}-arr`;
-      const diff = stop.arr.totalSeconds - nowSec;
-      if (!announcedKeys.has(key) && diff <= ANNOUNCE_ARRIVAL_LEAD_SEC && diff > ANNOUNCE_ARRIVAL_LEAD_SEC - 3) {
+      const diff = arrivalTriggerSec - nowSec;
+      if (!announcedKeys.has(key) && diff <= arrivalLead && diff > arrivalLead - 3) {
         announcedKeys.add(key);
         playAnnouncementQueue(buildArrivalAnnouncement(d));
       }
