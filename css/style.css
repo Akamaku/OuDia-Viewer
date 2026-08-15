@@ -636,6 +636,9 @@ select:focus, input:focus, button:focus {
   opacity: 0.8;
   white-space: nowrap;
 }
+.lcd-dest .lcd-romaji {
+  color: #fff;
+}
 
 @media (max-width: 760px) {
   .lcd-h:nth-child(1), .lcd-time { flex-basis: 96px; }
