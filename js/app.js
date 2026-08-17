@@ -140,6 +140,9 @@ async function init() {
   bindEvents();
   tickClock();
   setInterval(tickClock, 1000);
+  loadRomajiOverrides(); // 任意の駅名ローマ字追加ファイル(無くても動作する)
+  document.addEventListener('click', unlockAudioOnce, { once: true });
+  document.addEventListener('touchstart', unlockAudioOnce, { once: true });
 
   try {
     const manifest = await loadManifest();
@@ -292,7 +295,14 @@ function openTrainModal(train) {
     }
   });
 
-  const rows = stations.map((st, i) => {
+  // 上り列車は、下りと同じ並び(駅番号が小さい順)ではなく、
+  // 実際に進む向き(終着駅が上)に合わせて駅の並びを逆にする。
+  const order = train.direction === 'Nobori'
+    ? stations.map((_, i) => i).reverse()
+    : stations.map((_, i) => i);
+
+  const rows = order.map((i) => {
+    const st = stations[i];
     if (firstIdx === null || i < firstIdx || i > lastIdx) {
       return `<tr class="row-outside"><td class="col-eki">${escapeHtml(st.name)}</td><td class="col-dash">−</td></tr>`;
     }
@@ -338,6 +348,7 @@ function tickClock() {
   if (state.viewMode === 'realtime' && state.timetable) {
     renderBoard();
   }
+  if (state.timetable) checkAutoAnnouncements();
 }
 
 /** 現在時刻(useNow)または手動設定時刻(経過時間ぶん進み続ける)を { hour, minute, second } で返す(0-23に正規化した表示用) */
@@ -466,18 +477,17 @@ function showStatus(msg, level) {
   els.statusBar.classList.toggle('is-hidden', !visible);
 }
 
-/** 現在の基準時刻を「サービス日 0:00起点の分数」で返す(4時始発想定・深夜帯対応)。手動時刻は経過分ぶん進み続ける */
-function getNowServiceMinutes() {
-  const SERVICE_DAY_START = 4; // 4:00未満はサービス日的には「前日深夜」として扱う
+/** 現在の基準時刻を「サービス日 0:00起点の秒数」で返す(4時始発想定・深夜帯対応、パタパタ/LCDの切り替えと放送の秒単位トリガーの両方で使う)。手動時刻は経過秒ぶん進み続ける */
+function getNowServiceSeconds() {
+  const SERVICE_DAY_START = 4;
   if (state.useNow || !state.manualClock) {
     const now = new Date();
     const hour = now.getHours();
-    const minute = now.getMinutes();
     const adjHour = hour < SERVICE_DAY_START ? hour + 24 : hour;
-    return adjHour * 60 + minute;
+    return adjHour * 3600 + now.getMinutes() * 60 + now.getSeconds();
   }
-  const elapsedMin = (Date.now() - state.manualClock.setAtMs) / 60000;
-  return state.manualClock.baseMinutes + elapsedMin;
+  const elapsedSec = (Date.now() - state.manualClock.setAtMs) / 1000;
+  return state.manualClock.baseMinutes * 60 + elapsedSec;
 }
 
 function renderBoard() {
@@ -508,17 +518,36 @@ function collectStationDepartures(opts) {
     const stop = train.stops[stIndex];
     if (!stop) continue;
     if (stop.flag === '2') continue; // 通過(停車しない)駅では乗車できないため案内しない
-    if (!stop.dep) continue; // 発車が無い(到着のみ = 終着・降車専用)駅はここでは案内しない
-    const dep = stop.dep;
+
+    let timeInfo;
+    let displayDest;
+    let isTerminalHere = false;
+    if (stop.dep) {
+      timeInfo = stop.dep;
+      displayDest = train.destinationName;
+    } else if (stop.arr && train.destinationIndex === stIndex) {
+      // ここが終着駅。発車は無いが、到着時刻で案内する。
+      // 表示上の行先は(「当駅止まり」ではなく)実際の行先名をそのまま出す。
+      // 「当駅止まり」は放送(音声案内)の文言としてのみ使う(isTerminalHereで判定)。
+      timeInfo = stop.arr;
+      displayDest = train.destinationName;
+      isTerminalHere = true;
+    } else {
+      continue; // 発車も終着も無い駅ではここでは案内しない
+    }
+
     const displayType = displayTypeForStation(train, stationName);
     if (!ignoreFilters && !state.typeFiltersChecked.has(displayType)) continue;
-    if (!ignoreFilters && !state.destFiltersChecked.has(train.destinationName)) continue;
+    if (!ignoreFilters && !state.destFiltersChecked.has(displayDest)) continue;
     trains.push({
       train,
       stop,
-      departMinutes: dep.totalMinutes,
-      departLabel: dep.label,
+      departMinutes: timeInfo.totalMinutes,
+      departSeconds: timeInfo.totalSeconds,
+      departLabel: timeInfo.label,
       displayType,
+      displayDest,
+      isTerminalHere,
     });
   }
 
@@ -540,7 +569,7 @@ function ensureFilterDefaults(knownSet, checkedSet, values) {
 function populateFilterOptions() {
   const base = collectStationDepartures({ ignoreFilters: true });
   const types = [...new Set(base.map((d) => d.displayType).filter(Boolean))].sort();
-  const dests = [...new Set(base.map((d) => d.train.destinationName).filter(Boolean))].sort();
+  const dests = [...new Set(base.map((d) => d.displayDest).filter(Boolean))].sort();
 
   ensureFilterDefaults(state.typeFiltersKnown, state.typeFiltersChecked, types);
   ensureFilterDefaults(state.destFiltersKnown, state.destFiltersChecked, dests);
@@ -572,7 +601,7 @@ function renderCheckboxGroup(container, values, checkedSet, onChange) {
 
 function renderRealtimeBoard() {
   const stationName = state.timetable.stations[state.stationIndex]?.name || '';
-  const nowMin = getNowServiceMinutes();
+  const nowSec = getNowServiceSeconds();
   const all = collectStationDepartures();
 
   if (all.length === 0) {
@@ -582,10 +611,10 @@ function renderRealtimeBoard() {
     return;
   }
 
-  // 直近3本のみを表示する(発車時刻に基づく本当の並びのみで、無関係なローテーションはしない)
+  // 直近3本のみを表示する(発車時刻(秒単位)を過ぎた瞬間に切り替わる)
   const upcoming = all
-    .map((d) => ({ ...d, diff: d.departMinutes - nowMin }))
-    .filter((d) => d.diff >= -1)
+    .map((d) => ({ ...d, diff: d.departSeconds - nowSec }))
+    .filter((d) => d.diff >= 0)
     .sort((a, b) => a.diff - b.diff)
     .slice(0, FLAP_ROW_COUNT);
 
@@ -615,6 +644,60 @@ function lcdTypeStyle(typeName) {
   return LCD_TYPE_STYLES[typeName] || 'background:#374151;color:#fff;border-color:#374151;';
 }
 
+/**
+ * 種別名の英語表記(ローマ字ではなく英訳)。指定の無い種別(臨時・団体など)は表示しない。
+ */
+const TYPE_ENGLISH = {
+  '普通': 'Local',
+  '急行': 'Express',
+  '特急': 'Limited Express',
+  '通勤急行': 'Commuter Express',
+  '区間急行': 'Suburban Express',
+  'ライナー': 'Liner',
+  '回送': 'Out of service',
+  '試運転': 'Out of service',
+  '船渡川から普通 特急': 'Lim.Express +Minamigaoka.',
+  // 臨時・団体は英語表記なし(意図的に未登録)
+};
+
+/**
+ * 駅名のヘボン式ローマ字(既知の駅だけ内蔵。それ以外は oud/romaji.json があればそこから補う)。
+ * 漢字だけからは正しい読みを機械的に決められないため、自動変換はしていない。
+ */
+const STATION_ROMAJI = {
+  '青波中央': 'Aonami-chuo',
+  '青波西': 'Aonami-nishi',
+  '港が丘': 'Minato-ga-oka',
+  '潮見台': 'Shiomidai',
+  '波越': 'Namikoshi',
+  '朝日ヶ丘': 'Asahi-ga-oka',
+  '桜木町': 'Sakuragicho',
+  '新森町': 'Shinmorimachi',
+  '高輪平': 'Takanawadaira',
+  '峯川': 'Minegawa',
+  '花咲野': 'Hanasakino',
+  '緑ヶ丘': 'Midori-ga-oka',
+  '船渡川': 'Funatogawa',
+  '南ヶ丘': 'Minami-ga-oka',
+  '茶志内': 'Chashinai',
+  '青波駅前': 'Aonami-ekimae',
+  '波止場通': 'Hatobadori',
+  '柳町': 'Yanagimachi',
+  '茶志内駅': 'Chashinai-eki',
+};
+
+/** oud/romaji.json (任意)を読み込み、STATION_ROMAJI に追加する。無ければ何もしない。 */
+async function loadRomajiOverrides() {
+  try {
+    const res = await fetch('oud/romaji.json', { cache: 'no-store' });
+    if (res.ok) Object.assign(STATION_ROMAJI, await res.json());
+  } catch (e) { /* ファイルが無ければ静かに無視 */ }
+}
+
+function romajiSpan(text) {
+  return text ? `<span class="lcd-romaji">${escapeHtml(text)}</span>` : '';
+}
+
 function renderLcdSign(slots, stationName) {
   els.board.innerHTML = `
     <div class="lcd-sign">
@@ -633,13 +716,20 @@ function lcdRowHtml(d, stationName) {
     return `<div class="lcd-row is-empty" tabindex="-1"><span class="lcd-time"></span><span class="lcd-badge"></span><span class="lcd-dest"></span></div>`;
   }
   const { train, stop } = d;
-  const dep = stop.dep;
+  const timeInfo = stop.dep || stop.arr; // 発車が無ければ到着時刻(当駅止まり)を使う
   const displayType = displayTypeForStation(train, stationName);
+  const destName = d.displayDest || train.destinationName;
+  // 複合種別(「船渡川から普通 特急」等)はパタパタと同じ、上下2段の分割表示にする
+  const badgeContent = isCompoundType(displayType)
+    ? `<span class="lcd-badge-compound">${renderTypeFace(displayType)}</span>`
+    : `<span class="lcd-badge-main">${escapeHtml(displayType)}</span>${romajiSpan(TYPE_ENGLISH[displayType])}`;
   return `
     <div class="lcd-row" data-train-key="${train.key}" tabindex="0">
-      <span class="lcd-time">${dep ? dep.label : ''}</span>
-      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">${escapeHtml(displayType)}</span>
-      <span class="lcd-dest">${escapeHtml(train.destinationName)}</span>
+      <span class="lcd-time">${timeInfo ? timeInfo.label : ''}</span>
+      <span class="lcd-badge" style="${lcdTypeStyle(displayType)}">${badgeContent}</span>
+      <span class="lcd-dest">
+        <span class="lcd-dest-main">${escapeHtml(destName)}</span>${romajiSpan(STATION_ROMAJI[destName])}
+      </span>
     </div>
   `;
 }
@@ -686,14 +776,14 @@ function flapTargetIndices(d, stationName) {
     };
   }
   const { train, stop } = d;
-  const dep = stop.dep; // 発車時刻のみを使う(到着時刻は表示しない)
-  const hourStr = dep && dep.hour <= FLAP_MAX_HOUR ? String(dep.hour).padStart(2, '0') : '';
-  const minStr = dep ? String(dep.minute).padStart(2, '0') : '';
+  const timeInfo = stop.dep || stop.arr; // 発車が無ければ到着時刻(当駅止まり)を使う
+  const hourStr = timeInfo && timeInfo.hour <= FLAP_MAX_HOUR ? String(timeInfo.hour).padStart(2, '0') : '';
+  const minStr = timeInfo ? String(timeInfo.minute).padStart(2, '0') : '';
   return {
     hour: flapReelIndexFor(FLAP_REEL.hour, hourStr),
     minute: flapReelIndexFor(FLAP_REEL.minute, minStr),
     type: flapReelIndexFor(FLAP_REEL.type, displayTypeForStation(train, stationName)),
-    dest: flapReelIndexFor(FLAP_REEL.dest, train.destinationName),
+    dest: flapReelIndexFor(FLAP_REEL.dest, d.displayDest || train.destinationName),
   };
 }
 
@@ -759,8 +849,8 @@ function updateFlapSign(slots, stationName) {
   });
 }
 
-const FLAP_STEP_MS = 150; // 1コマあたりのめくり間隔
-const FLAP_LEAF_ANIM_MS = 130; // 葉が中央の水平線を軸に倒れ込むアニメーションの長さ
+const FLAP_STEP_MS = 110; // 1コマあたりのめくり間隔(動画を参考に高速化)
+const FLAP_LEAF_ANIM_MS = 80; // 葉が中央の水平線を軸に倒れ込むアニメーションの長さ(動画を参考に高速化)
 
 /**
  * 指定コマまで、リールの並び順(0→1→2→…→59→0)通りに1コマずつめくっていく。
@@ -879,7 +969,7 @@ function renderTimetableBrowser() {
             return `
             <tr data-train-key="${d.train.key}" tabindex="0">
               <td class="col-type"><span class="dep-badge dep-badge-inline" style="--chip-color:${chipColor}">${escapeHtml(displayType || '普通')}</span></td>
-              <td class="col-dest"><span class="dep-dest-inline">${escapeHtml(d.train.destinationName || '-')}</span><span class="train-number">${d.train.number ? ' ' + escapeHtml(d.train.number) : ''}</span></td>
+              <td class="col-dest"><span class="dep-dest-inline">${escapeHtml(d.displayDest || '-')}</span><span class="train-number">${d.train.number ? ' ' + escapeHtml(d.train.number) : ''}</span></td>
               <td class="col-time"><span class="dep-time-inline">${d.departLabel}</span></td>
               <td class="col-dir"><span class="dir-badge dir-${d.train.direction}">${d.train.direction === 'Kudari' ? '下り' : '上り'}</span></td>
             </tr>
@@ -895,4 +985,262 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]));
+}
+
+/* ============================================================
+ * 放送(音声案内)
+ * audio/ フォルダに指定のファイル名のwavを置くと再生される。
+ * ファイルが無い場合は静かにスキップする(他の機能には影響しない)。
+ *
+ * ・到着放送: 到着(秒単位)の25秒前から自動再生
+ * ・発車放送: 発車(秒単位)の20秒前から自動再生
+ * ・当駅止まりの場合は、到着放送(専用の台本)のみで発車放送は無く、
+ *   代わりに「この電車にはご乗車いただけません」を続けて再生する
+ * ・🔊ボタンでも同じ放送を手動再生できる
+ * ============================================================ */
+const ANNOUNCE_AUDIO_BASE = 'audio/';
+const ANNOUNCE_ARRIVAL_LEAD_SEC = 25; // 到着何秒前から流すか
+const ANNOUNCE_DEPARTURE_LEAD_SEC = 18; // 発車何秒前から流すか
+const ANNOUNCE_GAP_MS = 50; // 放送ファイルの継ぎ目の間隔(全て統一)
+const ANNOUNCE_GAP_MS_TIGHT = 50; // 継ぎ目の間隔は全て上と同じに統一
+
+function announceHourFile(hour) {
+  let h = hour;
+  if (h > 28) h %= 24;
+  h = Math.max(0, Math.min(28, h));
+  return `${String(h).padStart(3, '0')}-Aonami-Kosoku.wav`;
+}
+function announceMinuteFile(minute) {
+  const idx = minute === 0 ? 29 : 29 + minute; // 029=ちょうど発, 030〜088=1分発〜59分発
+  return `${String(idx).padStart(3, '0')}-Aonami-Kosoku.wav`;
+}
+
+// 種別名 -> 音声ファイル(行先と組み合わせて読み上げる、一般の営業種別)
+const ANNOUNCE_TYPE_FILES = {
+  '普通': '089-Aonami-Kosoku.wav',
+  '急行': '090-Aonami-Kosoku.wav',
+  '特急': '091-Aonami-Kosoku.wav',
+  '通勤急行': '092-Aonami-Kosoku.wav',
+  '区間急行': '093-Aonami-Kosoku.wav',
+  'ライナー': '094-Aonami-Kosoku.wav',
+  '船渡川から普通 特急': '095-Aonami-Kosoku.wav',
+  '臨時': '098-Aonami-Kosoku.wav',
+  '団体': '099-Aonami-Kosoku.wav',
+};
+// 種別名 -> 音声ファイル(お客様が乗車できない種別。行先とは組み合わせない)
+const ANNOUNCE_NONBOARDING_TYPE_FILES = {
+  '回送': '096-Aonami-Kosoku.wav',
+  '試運転': '097-Aonami-Kosoku.wav',
+};
+const ANNOUNCE_TERMINAL_HERE_FILE = '100-Aonami-Kosoku.wav'; // 当駅止まりの列車
+// 行先(駅名) -> 音声ファイル(「〜行き」)
+const ANNOUNCE_DEST_FILES = {
+  '青波中央': '101-Aonami-Kosoku.wav',
+  '港が丘': '102-Aonami-Kosoku.wav',
+  '朝日ヶ丘': '103-Aonami-Kosoku.wav',
+  '新森町': '104-Aonami-Kosoku.wav',
+  '高輪平': '105-Aonami-Kosoku.wav',
+  '花咲野': '106-Aonami-Kosoku.wav',
+  '船渡川': '107-Aonami-Kosoku.wav',
+  '茶志内': '108-Aonami-Kosoku.wav',
+};
+const ANNOUNCE_PHRASE = {
+  gaMairimasu: '109-Aonami-Kosoku.wav', // がまいります
+  safety: '110-Aonami-Kosoku.wav', // 危ないですから黄色の点字ブロックの内側へお下がりください
+  cannotBoard: '111-Aonami-Kosoku.wav', // この電車にはご乗車いただけません
+  omatase: '112-Aonami-Kosoku.wav', // お待たせいたしました
+  mamonaku: '113-Aonami-Kosoku.wav', // まもなく
+  gaHassha: '114-Aonami-Kosoku.wav', // が発車します。
+  doorClosing: '115-Aonami-Kosoku.wav', // ドアが締まります。ご注意ください。
+  turnBackPrefix: '116-Aonami-Kosoku.wav', // この電車は折り返し、
+  turnBackSuffix: '117-Aonami-Kosoku.wav', // になります
+  towardTakanawadairaChashinai: '118-Aonami-Kosoku.wav', // 高輪平・茶志内方面行き
+  lastTrainPrefix: '119-Aonami-Kosoku.wav', // この電車は、
+  lastTrainSuffix: '120-Aonami-Kosoku.wav', // の最終電車です。お乗り遅れの内容にご注意ください。
+  turnBackWord: '121-Aonami-Kosoku.wav', // 折り返し
+};
+
+/**
+ * 当駅止まりの列車のうち、指定した駅ではこの案内(「この電車は折り返し、〜行きになります」)を
+ * 通常の「当駅止まりの列車がまいります」の代わりに流す。
+ */
+const ANNOUNCE_TURNBACK_STATIONS = {
+  '高輪平': '青波中央',
+};
+
+/**
+ * 単一時刻(スラッシュ無し)の駅は arr と dep に同じ値が入るだけで、本当の「到着」ではない
+ * (始発駅など)。到着・発車が別の値のとき、または発車が無い(終着)ときだけ本当の到着とみなす。
+ */
+function hasGenuineArrival(stop) {
+  if (!stop.arr) return false;
+  if (!stop.dep) return true; // 終着(到着のみ)
+  return stop.arr.totalSeconds !== stop.dep.totalSeconds; // 停車時間のある本当の到着
+}
+
+/** キューに1件積む。gapAfterを指定すると、そのクリップの直後だけ既定と違う継ぎ目間隔にできる。 */
+function announceItem(file, gapAfter) {
+  return { file, gapAfter };
+}
+
+/** 到着放送の台本(発車時刻・分は読み上げず、「まもなく〜がまいります」形式)。
+ *  到着時刻が無い(始発駅の)場合はそもそも呼び出されない(checkAutoAnnouncements側で判定)。
+ *  種別(または「当駅止まりの列車」/折り返し案内)・行先から「がまいります」に入る直前だけ継ぎ目を詰める。 */
+function buildArrivalAnnouncement(d) {
+  const { displayType, displayDest, isTerminalHere } = d;
+  if (ANNOUNCE_NONBOARDING_TYPE_FILES[displayType]) {
+    // 回送・試運転はそもそも到着放送の対象にしない(発車放送側でご案内)
+    return [];
+  }
+  const queue = [announceItem(ANNOUNCE_PHRASE.mamonaku)];
+  if (isTerminalHere) {
+    const stationName = state.timetable?.stations[state.stationIndex]?.name;
+    const turnBackDest = ANNOUNCE_TURNBACK_STATIONS[stationName];
+    if (turnBackDest && ANNOUNCE_DEST_FILES[turnBackDest]) {
+      // 例:「まもなく…この電車は折り返し、青波中央行きになります」
+      queue.push(
+        announceItem(ANNOUNCE_PHRASE.turnBackPrefix, ANNOUNCE_GAP_MS_TIGHT),
+        announceItem(ANNOUNCE_DEST_FILES[turnBackDest], ANNOUNCE_GAP_MS_TIGHT),
+        announceItem(ANNOUNCE_PHRASE.turnBackSuffix),
+      );
+      return queue;
+    }
+    queue.push(
+      announceItem(ANNOUNCE_TERMINAL_HERE_FILE, ANNOUNCE_GAP_MS_TIGHT),
+      announceItem(ANNOUNCE_PHRASE.gaMairimasu),
+      announceItem(ANNOUNCE_PHRASE.safety),
+      announceItem(ANNOUNCE_PHRASE.cannotBoard),
+    );
+    return queue;
+  }
+  if (ANNOUNCE_TYPE_FILES[displayType]) queue.push(announceItem(ANNOUNCE_TYPE_FILES[displayType], ANNOUNCE_GAP_MS_TIGHT));
+  if (ANNOUNCE_DEST_FILES[displayDest]) queue.push(announceItem(ANNOUNCE_DEST_FILES[displayDest], ANNOUNCE_GAP_MS_TIGHT));
+  queue.push(announceItem(ANNOUNCE_PHRASE.gaMairimasu), announceItem(ANNOUNCE_PHRASE.safety));
+  return queue;
+}
+
+/** 発車放送の台本(「まもなく[時][分]発、[種別][行先]行きが発車します。ドアが締まります。」形式) */
+function buildDepartureAnnouncement(d) {
+  const { stop, displayType, displayDest } = d;
+  if (ANNOUNCE_NONBOARDING_TYPE_FILES[displayType]) {
+    return [announceItem(ANNOUNCE_NONBOARDING_TYPE_FILES[displayType]), announceItem(ANNOUNCE_PHRASE.cannotBoard)];
+  }
+  if (!stop.dep) return []; // 当駅止まり(発車が無い)には発車放送は無い
+  const queue = [
+    announceItem(ANNOUNCE_PHRASE.mamonaku),
+    announceItem(announceHourFile(stop.dep.hour)),
+    announceItem(announceMinuteFile(stop.dep.minute)),
+  ];
+  if (ANNOUNCE_TYPE_FILES[displayType]) queue.push(announceItem(ANNOUNCE_TYPE_FILES[displayType]));
+  if (ANNOUNCE_DEST_FILES[displayDest]) queue.push(announceItem(ANNOUNCE_DEST_FILES[displayDest]));
+  queue.push(announceItem(ANNOUNCE_PHRASE.gaHassha), announceItem(ANNOUNCE_PHRASE.doorClosing));
+  return queue;
+}
+
+/**
+ * 放送プレイヤー: 2つのAudio要素を交互に使い、片方を再生している間にもう片方へ
+ * 次のファイルを先読みしておくことで、ファイルの継ぎ目の無音区間をできるだけ短くする。
+ * 複数の放送が重なった場合は割り込まず、キューに積んで順番に流す。
+ */
+const announcePlayer = {
+  audios: (typeof Audio !== 'undefined') ? [new Audio(), new Audio()] : null,
+  active: 0,
+  queue: [],
+  playing: false,
+};
+if (announcePlayer.audios) {
+  announcePlayer.audios.forEach((a) => { a.preload = 'auto'; });
+
+  const preloadInto = (idx, file) => {
+    const a = announcePlayer.audios[idx];
+    if (a.dataset.pendingFile === file) return; // 既に先読み済み
+    a.src = ANNOUNCE_AUDIO_BASE + file;
+    a.dataset.pendingFile = file;
+    a.load();
+  };
+
+  const playCurrent = () => {
+    if (announcePlayer.queue.length === 0) { announcePlayer.playing = false; return; }
+    announcePlayer.playing = true;
+    const item = announcePlayer.queue.shift();
+    const file = item.file;
+    announcePlayer.currentGapAfter = item.gapAfter || ANNOUNCE_GAP_MS;
+    const idx = announcePlayer.active;
+    const audio = announcePlayer.audios[idx];
+    try {
+      if (audio.dataset.pendingFile !== file) {
+        audio.src = ANNOUNCE_AUDIO_BASE + file;
+        audio.dataset.pendingFile = file;
+      }
+      // 注意: src変更直後にcurrentTimeを触るとメタデータ未読込でエラーになるブラウザがあるため触らない
+      audio.play().catch(advance);
+    } catch (e) {
+      advance();
+      return;
+    }
+    // 再生中に、次のファイルをもう片方の要素へ先読みしておく
+    const nextItem = announcePlayer.queue[0];
+    if (nextItem) preloadInto(1 - idx, nextItem.file);
+  };
+  function advance() {
+    announcePlayer.active = 1 - announcePlayer.active;
+    playCurrent();
+  }
+  function advanceWithGap() {
+    window.setTimeout(advance, announcePlayer.currentGapAfter || ANNOUNCE_GAP_MS);
+  }
+  announcePlayer.audios.forEach((a) => {
+    a.addEventListener('ended', advanceWithGap);
+    a.addEventListener('error', advance); // 再生エラー時は間を空けずすぐ次へ
+  });
+  announcePlayer._playCurrent = playCurrent;
+}
+/** 放送キューに追加する(再生中なら続けて、空いていればすぐに再生)。ファイルが無ければ静かにスキップして次へ進む。 */
+function playAnnouncementQueue(items) {
+  if (!items || !items.length || !announcePlayer.audios) return;
+  announcePlayer.queue.push(...items);
+  if (!announcePlayer.playing) announcePlayer._playCurrent();
+}
+
+// 一部のブラウザは、ページ内で一度もクリック等の操作が無いと音声の自動再生を拒否する。
+// 最初のユーザー操作で無音の再生を試み、以降の自動放送が鳴りやすいようにしておく。
+let audioUnlocked = false;
+function unlockAudioOnce() {
+  if (audioUnlocked || !announcePlayer.audios) return;
+  audioUnlocked = true;
+  announcePlayer.audios.forEach((a) => {
+    a.muted = true;
+    a.play().then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
+  });
+}
+
+/**
+ * 毎秒呼び出し、選択中の駅で「到着25秒前」「発車18秒前」に当たる列車があれば自動で放送する。
+ * 到着時刻が無い駅(始発駅)では到着放送は流さない(発車放送のみ)。
+ * 同じ列車・同じ種類(到着/発車)の放送を何度も鳴らさないよう、announcedKeys に記録しておく。
+ */
+const announcedKeys = new Set();
+function checkAutoAnnouncements() {
+  if (!state.timetable) return;
+  const nowSec = getNowServiceSeconds();
+  const all = collectStationDepartures();
+  all.forEach((d) => {
+    const { stop, train } = d;
+    if (hasGenuineArrival(stop)) {
+      const key = `${train.key}-arr`;
+      const diff = stop.arr.totalSeconds - nowSec;
+      if (!announcedKeys.has(key) && diff <= ANNOUNCE_ARRIVAL_LEAD_SEC && diff > ANNOUNCE_ARRIVAL_LEAD_SEC - 3) {
+        announcedKeys.add(key);
+        playAnnouncementQueue(buildArrivalAnnouncement(d));
+      }
+    }
+    if (stop.dep) {
+      const key = `${train.key}-dep`;
+      const diff = stop.dep.totalSeconds - nowSec;
+      if (!announcedKeys.has(key) && diff <= ANNOUNCE_DEPARTURE_LEAD_SEC && diff > ANNOUNCE_DEPARTURE_LEAD_SEC - 3) {
+        announcedKeys.add(key);
+        playAnnouncementQueue(buildDepartureAnnouncement(d));
+      }
+    }
+  });
 }
