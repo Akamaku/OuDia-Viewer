@@ -396,7 +396,7 @@ select:focus, input:focus, button:focus {
 .flap-leaf-inner.is-bottom-half { top: auto; bottom: 0; } /* 後半(下半分クリップ、次の値) */
 
 .flap-leaf.is-flipping {
-  animation: flap-leaf-fall 0.08s linear forwards;
+  animation: flap-leaf-fall 0.13s linear forwards;
 }
 @keyframes flap-leaf-fall {
   0%   {
@@ -545,8 +545,8 @@ select:focus, input:focus, button:focus {
   text-transform: uppercase;
   color: #8b93a0;
 }
-.lcd-h:nth-child(1) { flex: 0 0 150px; }
-.lcd-h:nth-child(2) { flex: 0 0 190px; }
+.lcd-h:nth-child(1) { flex: 0 0 140px; }
+.lcd-h:nth-child(2) { flex: 0 0 150px; }
 .lcd-h:nth-child(3) { flex: 1; }
 
 .lcd-sign-body {
@@ -568,84 +568,38 @@ select:focus, input:focus, button:focus {
 .lcd-row.is-empty { background: #14181f; cursor: default; }
 
 .lcd-time {
-  flex: 0 0 150px;
-  font-family: var(--font-jp);
+  flex: 0 0 140px;
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 32px;
+  font-size: 28px;
   color: #f2e6c8;
   font-variant-numeric: tabular-nums;
 }
 .lcd-badge {
-  flex: 0 0 190px;
+  flex: 0 0 150px;
   display: inline-flex;
-  align-items: baseline;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 2px 7px;
-  padding: 9px 10px;
-  border-radius: 0; /* 種別枠は角ばらせる */
-  border: 1px solid transparent;
-  text-align: center;
-}
-.lcd-badge-main {
-  font-weight: 700;
-  font-size: 21px;
-}
-/* 複合種別(「船渡川から普通 特急」等)はパタパタと同じ、上下2段の分割表示 */
-.lcd-badge-compound {
-  display: block;
-  width: 100%;
-  font-size: 17px;
-  line-height: 1.15;
-}
-.lcd-badge .type-compound {
-  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-}
-.lcd-badge .type-compound-small {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  font-size: 0.62em;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
   font-weight: 700;
-  line-height: 1.2;
-  text-align: left;
-}
-.lcd-badge .type-compound-large {
-  font-size: 1.3em;
-  font-weight: 900;
+  font-size: 18px;
+  text-align: center;
 }
 .lcd-dest {
   flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-}
-.lcd-dest-main {
   font-weight: 900;
-  font-size: 30px;
-  color: #fff;
-}
-.lcd-romaji {
-  font-family: var(--font-display);
-  font-size: 0.52em;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  opacity: 0.8;
-  white-space: nowrap;
-}
-.lcd-dest .lcd-romaji {
+  font-size: 26px;
   color: #fff;
 }
 
 @media (max-width: 760px) {
-  .lcd-h:nth-child(1), .lcd-time { flex-basis: 96px; }
-  .lcd-h:nth-child(2), .lcd-badge { flex-basis: 130px; }
-  .lcd-time { font-size: 22px; }
-  .lcd-badge-main { font-size: 15px; }
-  .lcd-dest-main { font-size: 20px; }
+  .lcd-h:nth-child(1), .lcd-time { flex-basis: 90px; }
+  .lcd-h:nth-child(2), .lcd-badge { flex-basis: 100px; }
+  .lcd-time { font-size: 20px; }
+  .lcd-badge { font-size: 14px; padding: 6px 8px; }
+  .lcd-dest { font-size: 18px; }
 }
 
 /* 時刻表ブラウザ側でも同じフォントトーンの種別バッジ・時刻表記を使う */
