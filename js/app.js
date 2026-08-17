@@ -848,8 +848,8 @@ function updateFlapSign(slots, stationName) {
   });
 }
 
-const FLAP_STEP_MS = 150; // 1コマあたりのめくり間隔
-const FLAP_LEAF_ANIM_MS = 130; // 葉が中央の水平線を軸に倒れ込むアニメーションの長さ
+const FLAP_STEP_MS = 110; // 1コマあたりのめくり間隔(動画を参考に高速化)
+const FLAP_LEAF_ANIM_MS = 80; // 葉が中央の水平線を軸に倒れ込むアニメーションの長さ(動画を参考に高速化)
 
 /**
  * 指定コマまで、リールの並び順(0→1→2→…→59→0)通りに1コマずつめくっていく。
@@ -1001,6 +1001,7 @@ const ANNOUNCE_AUDIO_BASE = 'audio/';
 const ANNOUNCE_ARRIVAL_LEAD_SEC = 25; // 到着何秒前から流すか
 const ANNOUNCE_DEPARTURE_LEAD_SEC = 18; // 発車何秒前から流すか
 const ANNOUNCE_ORIGIN_ARRIVAL_LEAD_SEC = 60; // 到着時刻が無い駅(始発駅)は、発車の何秒前から到着放送を始めるか
+const ANNOUNCE_GAP_MS = 150; // 放送ファイルの継ぎ目の間隔
 
 function announceHourFile(hour) {
   let h = hour;
@@ -1141,9 +1142,12 @@ if (announcePlayer.audios) {
     announcePlayer.active = 1 - announcePlayer.active;
     playCurrent();
   }
+  function advanceWithGap() {
+    window.setTimeout(advance, ANNOUNCE_GAP_MS);
+  }
   announcePlayer.audios.forEach((a) => {
-    a.addEventListener('ended', advance);
-    a.addEventListener('error', advance);
+    a.addEventListener('ended', advanceWithGap);
+    a.addEventListener('error', advance); // 再生エラー時は間を空けずすぐ次へ
   });
   announcePlayer._playCurrent = playCurrent;
 }
