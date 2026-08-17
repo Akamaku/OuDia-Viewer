@@ -34,12 +34,14 @@ const FLAP_ROW_COUNT = 3; // 発車案内の表示段数
  * リールは一方向にしか回らないため、値が変わるときは目的のコマまで1つずつ順番にめくれる。
  * 実際の車両・路線に合わせて自由に編集してください。
  */
+/** 終着駅で行先の代わりに表示する文言(路線の両端以外の駅で終着になる場合に使う) */
+const TERMINAL_HERE_LABEL = '当駅止まり';
 const FLAP_TYPES = [
   '普通', '急行', '特急', '通勤急行', 'ライナー', '回送',
   '通過', '臨時', '団体', '試運転', '区間急行', '船渡川から普通 特急',
 ];
 const FLAP_DESTINATIONS = [
-  '青波中央', '茶志内', '船渡川', '高輪平', '朝日ヶ丘', '港が丘', '新森町', '花咲野',
+  '青波中央', '茶志内', '船渡川', '高輪平', '朝日ヶ丘', '港が丘', '新森町', '花咲野', TERMINAL_HERE_LABEL,
 ];
 const FLAP_MAX_HOUR = 28; // 時のコマは00〜28まで(深夜帯対応)。それ以外は無表示
 const FLAP_SLOTS = 60; // 時・分のリールはどちらも60コマ
@@ -56,7 +58,8 @@ function buildWordReel(words) {
 
 const FLAP_REEL = {
   hour: buildFlapReel((i) => (i <= FLAP_MAX_HOUR ? String(i).padStart(2, '0') : '')),
-  minute: buildFlapReel((i) => String(i).padStart(2, '0')),
+  // 分は0〜59すべてに値があるため、末尾に空欄コマを1つ追加しておく(非営業列車などで時刻を非表示にする用)
+  minute: [...buildFlapReel((i) => String(i).padStart(2, '0')), ''],
   type: buildWordReel(FLAP_TYPES),
   dest: buildWordReel(FLAP_DESTINATIONS),
 };
@@ -141,8 +144,9 @@ async function init() {
   tickClock();
   setInterval(tickClock, 1000);
   loadRomajiOverrides(); // 任意の駅名ローマ字追加ファイル(無くても動作する)
-  document.addEventListener('click', unlockAudioOnce, { once: true });
-  document.addEventListener('touchstart', unlockAudioOnce, { once: true });
+  document.addEventListener('click', unlockAudioOnce);
+  document.addEventListener('touchstart', unlockAudioOnce);
+  document.addEventListener('keydown', unlockAudioOnce);
 
   try {
     const manifest = await loadManifest();
@@ -501,6 +505,9 @@ function renderBoard() {
   }
 }
 
+/** 終着駅でも「当駅止まり」ではなく通常の行先名で表示する駅(=路線の両端。終点であることが当たり前なため) */
+const TERMINAL_STATIONS_SHOW_NORMAL_NAME = ['青波中央', '茶志内'];
+
 function collectStationDepartures(opts) {
   const ignoreFilters = !!(opts && opts.ignoreFilters);
   const dia = state.timetable.dias[state.diaIndex];
@@ -527,11 +534,10 @@ function collectStationDepartures(opts) {
       displayDest = train.destinationName;
     } else if (stop.arr && train.destinationIndex === stIndex) {
       // ここが終着駅。発車は無いが、到着時刻で案内する。
-      // 表示上の行先は(「当駅止まり」ではなく)実際の行先名をそのまま出す。
-      // 「当駅止まり」は放送(音声案内)の文言としてのみ使う(isTerminalHereで判定)。
+      // 路線の両端(青波中央・茶志内)は通常の行先名、それ以外の駅では「当駅止まり」と表示する。
       timeInfo = stop.arr;
-      displayDest = train.destinationName;
       isTerminalHere = true;
+      displayDest = TERMINAL_STATIONS_SHOW_NORMAL_NAME.includes(stationName) ? train.destinationName : TERMINAL_HERE_LABEL;
     } else {
       continue; // 発車も終着も無い駅ではここでは案内しない
     }
@@ -539,15 +545,17 @@ function collectStationDepartures(opts) {
     const displayType = displayTypeForStation(train, stationName);
     if (!ignoreFilters && !state.typeFiltersChecked.has(displayType)) continue;
     if (!ignoreFilters && !state.destFiltersChecked.has(displayDest)) continue;
+    const isNonBoarding = !!ANNOUNCE_NONBOARDING_TYPE_FILES[displayType]; // 非営業・一般人が乗れない列車は時刻を表示しない
     trains.push({
       train,
       stop,
       departMinutes: timeInfo.totalMinutes,
       departSeconds: timeInfo.totalSeconds,
-      departLabel: timeInfo.label,
+      departLabel: isNonBoarding ? '' : timeInfo.label,
       displayType,
       displayDest,
       isTerminalHere,
+      isNonBoarding,
     });
   }
 
@@ -716,7 +724,8 @@ function lcdRowHtml(d, stationName) {
     return `<div class="lcd-row is-empty" tabindex="-1"><span class="lcd-time"></span><span class="lcd-badge"></span><span class="lcd-dest"></span></div>`;
   }
   const { train, stop } = d;
-  const timeInfo = stop.dep || stop.arr; // 発車が無ければ到着時刻(当駅止まり)を使う
+  // 非営業・一般人が乗れない列車(回送・試運転)は時刻を表示しない
+  const timeInfo = d.isNonBoarding ? null : (stop.dep || stop.arr);
   const displayType = displayTypeForStation(train, stationName);
   const destName = d.displayDest || train.destinationName;
   // 複合種別(「船渡川から普通 特急」等)はパタパタと同じ、上下2段の分割表示にする
@@ -776,7 +785,8 @@ function flapTargetIndices(d, stationName) {
     };
   }
   const { train, stop } = d;
-  const timeInfo = stop.dep || stop.arr; // 発車が無ければ到着時刻(当駅止まり)を使う
+  // 非営業・一般人が乗れない列車(回送・試運転)は時刻を表示しない
+  const timeInfo = d.isNonBoarding ? null : (stop.dep || stop.arr);
   const hourStr = timeInfo && timeInfo.hour <= FLAP_MAX_HOUR ? String(timeInfo.hour).padStart(2, '0') : '';
   const minStr = timeInfo ? String(timeInfo.minute).padStart(2, '0') : '';
   return {
@@ -1167,15 +1177,25 @@ if (announcePlayer.audios) {
     announcePlayer.currentGapAfter = item.gapAfter || ANNOUNCE_GAP_MS;
     const idx = announcePlayer.active;
     const audio = announcePlayer.audios[idx];
+    const onPlayFail = (err) => {
+      if (err && err.name === 'NotAllowedError') {
+        // 自動再生がブラウザにブロックされている場合、キューを空で消費し続けず打ち切る
+        // (次のユーザー操作でunlockAudioOnceが成功すれば、以降の放送は正常に鳴るようになる)
+        announcePlayer.queue = [];
+        announcePlayer.playing = false;
+      } else {
+        advance(); // ファイルが無い等、他の理由の失敗は、そのファイルだけ諦めて次へ
+      }
+    };
     try {
       if (audio.dataset.pendingFile !== file) {
         audio.src = ANNOUNCE_AUDIO_BASE + file;
         audio.dataset.pendingFile = file;
       }
       // 注意: src変更直後にcurrentTimeを触るとメタデータ未読込でエラーになるブラウザがあるため触らない
-      audio.play().catch(advance);
+      audio.play().then(() => { audioUnlocked = true; }).catch(onPlayFail);
     } catch (e) {
-      advance();
+      onPlayFail(e);
       return;
     }
     // 再生中に、次のファイルをもう片方の要素へ先読みしておく
@@ -1202,15 +1222,20 @@ function playAnnouncementQueue(items) {
   if (!announcePlayer.playing) announcePlayer._playCurrent();
 }
 
-// 一部のブラウザは、ページ内で一度もクリック等の操作が無いと音声の自動再生を拒否する。
-// 最初のユーザー操作で無音の再生を試み、以降の自動放送が鳴りやすいようにしておく。
+// 一部のブラウザは、ページ内で一度も(再生に有効な)操作が無いと音声の自動再生を拒否する。
+// 最初のユーザー操作で解除を試み、失敗した場合は次の操作でも再試行する
+// (直前の実装は最初の1回で成功したかどうかに関わらず「解除済み」にしてしまっており、
+//  ブラウザが拒否した場合そのまま放送が二度と鳴らなくなるバグがあったため修正)。
 let audioUnlocked = false;
 function unlockAudioOnce() {
   if (audioUnlocked || !announcePlayer.audios) return;
-  audioUnlocked = true;
   announcePlayer.audios.forEach((a) => {
     a.muted = true;
-    a.play().then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
+    a.play().then(() => {
+      audioUnlocked = true; // 実際に再生できたときだけ「解除済み」にする
+      a.pause();
+      a.muted = false;
+    }).catch(() => { a.muted = false; }); // 失敗時は解除済みにしない → 次の操作でまた試す
   });
 }
 
