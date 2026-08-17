@@ -146,17 +146,6 @@ function parseEkiJikoku(raw, stationCount) {
   return stops;
 }
 
-/**
- * 上り列車は、駅の並び全体(青波中央⇔茶志内を軸)でミラーして時刻を割り当て直す。
- * このファイルは上りのEkiJikokuが下りと同じ「駅番号が増える向き」に記録されているため、
- * そのままだと「茶志内行きのはずが茶志内で時刻が一番早い」といった矛盾が起きる。
- * 途中区間だけを走る列車も、記録されている区間をそのまま線対称の反対側の区間として扱う
- * (例: 「峯川〜茶志内」の記録は「朝日ヶ丘〜青波中央」の列車として扱う)。
- */
-function reverseStopsWithinRange(stops) {
-  return stops.slice().reverse();
-}
-
 /** Kudari(下り) / Nobori(上り) 方向の列車一覧を抽出 */
 function extractDirection(diaNode, dirKey, stations, types) {
   const dirNode = ouChildren(diaNode, dirKey)[0];
@@ -165,21 +154,17 @@ function extractDirection(diaNode, dirKey, stations, types) {
   return ouChildren(dirNode, 'Ressya').map((rNode, idx) => {
     const typeIndex = parseInt(ouProp(rNode, 'Syubetsu') || '0', 10);
     const number = ouProp(rNode, 'Ressyabangou') || '';
-    const rawStops = parseEkiJikoku(ouProp(rNode, 'EkiJikoku') || '', stations.length);
-    const stops = dirKey === 'Nobori' ? reverseStopsWithinRange(rawStops) : rawStops;
+    const stops = parseEkiJikoku(ouProp(rNode, 'EkiJikoku') || '', stations.length);
 
-    // 行先(終着駅)を決定: 上り(Nobori)は駅番号が小さい方向(青波中央方面)、
-    // 下り(Kudari)は駅番号が大きい方向(茶志内方面)に進む、という向きで判定する。
-    // (このファイルは上り側もEkiJikoku上の時刻が駅番号の増える向きに記録されているため、
-    //  時刻だけで判定すると上りが下りと同じ向きになってしまう。方向ラベルを優先する。)
+    // 行先(終着駅)を決定: Kudariは最後に停車するインデックスが最大の駅、
+    // Noboriは最後に停車するインデックスが最小の駅
     let destIndex = null;
-    if (dirKey === 'Kudari') {
-      for (let i = 0; i < stops.length; i++) {
-        if (stops[i]) destIndex = i; // 最後まで更新し続けると最大indexが残る
-      }
-    } else {
-      for (let i = 0; i < stops.length; i++) {
-        if (stops[i]) { destIndex = i; break; } // 最初に見つかった(最小index)駅が終着
+    for (let i = 0; i < stops.length; i++) {
+      if (!stops[i]) continue;
+      if (dirKey === 'Kudari') {
+        destIndex = i; // 前から更新していくと最終的に最大indexが残る
+      } else if (destIndex === null) {
+        destIndex = i; // Noboriは最初に見つかった(最小index)が終着
       }
     }
 
