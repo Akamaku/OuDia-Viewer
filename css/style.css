@@ -396,7 +396,7 @@ select:focus, input:focus, button:focus {
 .flap-leaf-inner.is-bottom-half { top: auto; bottom: 0; } /* 後半(下半分クリップ、次の値) */
 
 .flap-leaf.is-flipping {
-  animation: flap-leaf-fall 0.13s linear forwards;
+  animation: flap-leaf-fall 0.08s linear forwards;
 }
 @keyframes flap-leaf-fall {
   0%   {
